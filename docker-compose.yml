@@ -1,0 +1,29 @@
+# Radar runs as ONE container. There is no database service because SQLite is the
+# database — a deliberate choice (see DECISIONS.md D2), not an omission.
+#
+#   docker compose up --build     ->  http://localhost:4000
+#
+services:
+  radar:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      RADAR_DB: /data/radar.db
+      # Ingestion stays idle outside market hours regardless; set to 1 to force it off.
+      RADAR_NO_INGEST: "0"
+    volumes:
+      # The recorded session persists across container rebuilds. It cannot be re-recorded.
+      - radar-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  radar-data:

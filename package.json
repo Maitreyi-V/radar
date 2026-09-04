@@ -1,0 +1,10 @@
+{
+  "name": "radar",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/server", "apps/web"],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/server & npm run dev --workspace=apps/web",
+    "test": "npm run test --workspace=apps/server"
+  }
+}

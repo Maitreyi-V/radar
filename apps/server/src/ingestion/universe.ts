@@ -1,0 +1,75 @@
+/**
+ * Curated NSE universe. Deliberately spans large / mid / small cap and several
+ * sectors, because the whole thesis is that a 2% move means different things in
+ * a large-cap bank and a volatile small-cap. We need both in the data to prove it.
+ *
+ * Scaling seam: this is a hardcoded ~60-symbol list. The real system loads the
+ * ~2,000-symbol NSE master into the `symbols` table; nothing downstream changes,
+ * because fetching scales with the symbol universe, not with users.
+ */
+export interface SymbolMeta { symbol: string; name: string; cap: 'large' | 'mid' | 'small'; sector: string }
+
+export const UNIVERSE: SymbolMeta[] = [
+  { symbol: 'RELIANCE.NS', name: 'Reliance Industries', cap: 'large', sector: 'Energy' },
+  { symbol: 'TCS.NS', name: 'Tata Consultancy Services', cap: 'large', sector: 'IT' },
+  { symbol: 'HDFCBANK.NS', name: 'HDFC Bank', cap: 'large', sector: 'Banking' },
+  { symbol: 'ICICIBANK.NS', name: 'ICICI Bank', cap: 'large', sector: 'Banking' },
+  { symbol: 'INFY.NS', name: 'Infosys', cap: 'large', sector: 'IT' },
+  { symbol: 'SBIN.NS', name: 'State Bank of India', cap: 'large', sector: 'Banking' },
+  { symbol: 'BHARTIARTL.NS', name: 'Bharti Airtel', cap: 'large', sector: 'Telecom' },
+  { symbol: 'ITC.NS', name: 'ITC', cap: 'large', sector: 'FMCG' },
+  { symbol: 'LT.NS', name: 'Larsen & Toubro', cap: 'large', sector: 'Infrastructure' },
+  { symbol: 'AXISBANK.NS', name: 'Axis Bank', cap: 'large', sector: 'Banking' },
+  { symbol: 'KOTAKBANK.NS', name: 'Kotak Mahindra Bank', cap: 'large', sector: 'Banking' },
+  { symbol: 'HINDUNILVR.NS', name: 'Hindustan Unilever', cap: 'large', sector: 'FMCG' },
+  { symbol: 'MARUTI.NS', name: 'Maruti Suzuki', cap: 'large', sector: 'Auto' },
+  { symbol: 'TATAMOTORS.NS', name: 'Tata Motors', cap: 'large', sector: 'Auto' },
+  { symbol: 'SUNPHARMA.NS', name: 'Sun Pharmaceutical', cap: 'large', sector: 'Pharma' },
+  { symbol: 'ASIANPAINT.NS', name: 'Asian Paints', cap: 'large', sector: 'Consumer' },
+  { symbol: 'TITAN.NS', name: 'Titan Company', cap: 'large', sector: 'Consumer' },
+  { symbol: 'BAJFINANCE.NS', name: 'Bajaj Finance', cap: 'large', sector: 'Financials' },
+  { symbol: 'WIPRO.NS', name: 'Wipro', cap: 'large', sector: 'IT' },
+  { symbol: 'HCLTECH.NS', name: 'HCL Technologies', cap: 'large', sector: 'IT' },
+  { symbol: 'ULTRACEMCO.NS', name: 'UltraTech Cement', cap: 'large', sector: 'Cement' },
+  { symbol: 'NESTLEIND.NS', name: 'Nestle India', cap: 'large', sector: 'FMCG' },
+  { symbol: 'POWERGRID.NS', name: 'Power Grid Corp', cap: 'large', sector: 'Utilities' },
+  { symbol: 'NTPC.NS', name: 'NTPC', cap: 'large', sector: 'Utilities' },
+  { symbol: 'ONGC.NS', name: 'Oil & Natural Gas Corp', cap: 'large', sector: 'Energy' },
+  { symbol: 'TATASTEEL.NS', name: 'Tata Steel', cap: 'large', sector: 'Metals' },
+  { symbol: 'JSWSTEEL.NS', name: 'JSW Steel', cap: 'large', sector: 'Metals' },
+  { symbol: 'ADANIENT.NS', name: 'Adani Enterprises', cap: 'large', sector: 'Conglomerate' },
+  { symbol: 'ADANIPORTS.NS', name: 'Adani Ports & SEZ', cap: 'large', sector: 'Infrastructure' },
+  { symbol: 'COALINDIA.NS', name: 'Coal India', cap: 'large', sector: 'Mining' },
+  { symbol: 'HINDALCO.NS', name: 'Hindalco Industries', cap: 'mid', sector: 'Metals' },
+  { symbol: 'GRASIM.NS', name: 'Grasim Industries', cap: 'mid', sector: 'Cement' },
+  { symbol: 'DRREDDY.NS', name: "Dr Reddy's Labs", cap: 'mid', sector: 'Pharma' },
+  { symbol: 'CIPLA.NS', name: 'Cipla', cap: 'mid', sector: 'Pharma' },
+  { symbol: 'EICHERMOT.NS', name: 'Eicher Motors', cap: 'mid', sector: 'Auto' },
+  { symbol: 'BAJAJ-AUTO.NS', name: 'Bajaj Auto', cap: 'mid', sector: 'Auto' },
+  { symbol: 'HEROMOTOCO.NS', name: 'Hero MotoCorp', cap: 'mid', sector: 'Auto' },
+  { symbol: 'BRITANNIA.NS', name: 'Britannia Industries', cap: 'mid', sector: 'FMCG' },
+  { symbol: 'DIVISLAB.NS', name: "Divi's Laboratories", cap: 'mid', sector: 'Pharma' },
+  { symbol: 'TECHM.NS', name: 'Tech Mahindra', cap: 'mid', sector: 'IT' },
+  { symbol: 'INDUSINDBK.NS', name: 'IndusInd Bank', cap: 'mid', sector: 'Banking' },
+  { symbol: 'DLF.NS', name: 'DLF', cap: 'mid', sector: 'Realty' },
+  { symbol: 'VEDL.NS', name: 'Vedanta', cap: 'mid', sector: 'Metals' },
+  { symbol: 'ZOMATO.NS', name: 'Eternal (Zomato)', cap: 'mid', sector: 'Internet' },
+  { symbol: 'PAYTM.NS', name: 'One97 (Paytm)', cap: 'small', sector: 'Fintech' },
+  { symbol: 'NYKAA.NS', name: 'FSN E-Commerce (Nykaa)', cap: 'small', sector: 'Internet' },
+  { symbol: 'IDEA.NS', name: 'Vodafone Idea', cap: 'small', sector: 'Telecom' },
+  { symbol: 'YESBANK.NS', name: 'Yes Bank', cap: 'small', sector: 'Banking' },
+  { symbol: 'SUZLON.NS', name: 'Suzlon Energy', cap: 'small', sector: 'Renewables' },
+  { symbol: 'IRFC.NS', name: 'Indian Railway Finance', cap: 'small', sector: 'Financials' },
+  { symbol: 'RVNL.NS', name: 'Rail Vikas Nigam', cap: 'small', sector: 'Infrastructure' },
+  { symbol: 'IRCTC.NS', name: 'IRCTC', cap: 'small', sector: 'Travel' },
+  { symbol: 'BEL.NS', name: 'Bharat Electronics', cap: 'mid', sector: 'Defence' },
+  { symbol: 'HAL.NS', name: 'Hindustan Aeronautics', cap: 'mid', sector: 'Defence' },
+  { symbol: 'TATAPOWER.NS', name: 'Tata Power', cap: 'mid', sector: 'Utilities' },
+  { symbol: 'PNB.NS', name: 'Punjab National Bank', cap: 'small', sector: 'Banking' },
+  { symbol: 'BANKBARODA.NS', name: 'Bank of Baroda', cap: 'mid', sector: 'Banking' },
+  { symbol: 'GAIL.NS', name: 'GAIL India', cap: 'mid', sector: 'Energy' },
+  { symbol: 'JIOFIN.NS', name: 'Jio Financial Services', cap: 'mid', sector: 'Financials' },
+  { symbol: 'POLICYBZR.NS', name: 'PB Fintech', cap: 'small', sector: 'Fintech' },
+];
+
+export const UNIVERSE_SYMBOLS = UNIVERSE.map((s) => s.symbol);
