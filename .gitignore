@@ -1,5 +1,12 @@
 node_modules
 dist
 .env
+
+# TypeScript incremental build cache — machine-specific, never useful in a repo
+*.tsbuildinfo
+
+# SQLite sidecars. NOTE: data/radar.db itself is deliberately TRACKED — it holds the
+# recorded Friday session, which cannot be re-recorded and is what makes the app
+# demonstrable while the market is closed.
 apps/server/data/*.db-shm
 apps/server/data/*.db-wal
