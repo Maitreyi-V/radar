@@ -220,10 +220,14 @@ a dead screen.
 So we recorded the market instead:
 
 ```
-23,154 quote rows · 60 NSE symbols
-22,435 intraday ticks — 09:15:59 → 15:33:25 IST, Friday 4 Sep 2026
- 3,942 daily bars   — 2025-09-04 → 2026-09-04, all 60 symbols
+ 23,158 quote rows      · 60 NSE symbols, recorded tick by tick
+ 22,435 intraday ticks  — 09:15:59 → 15:33:25 IST, Friday 4 Sep 2026
+112,624 daily bars      — 45 sessions across 2,748 symbols
+  4,999 symbols         — the full active-equity master, all searchable
 ```
+
+Any listed stock you add is fully supported: it has 45 sessions of history, so the engine can
+judge it against its own volatility immediately, and its live price is fetched on demand.
 
 **Replay mode** plays that session back at 1×–600× through the same ingestion → SSE → digest
 path live data takes. Watch the digest re-rank mid-replay and you are watching the real engine,
@@ -305,10 +309,12 @@ fetch per symbol per interval, shared by everyone. 10 users and 10,000 users cau
 outbound load. This falls out of the architecture for free.
 
 **Daily history scales by day, not by symbol.** We load NSE's official bhavcopy: one file per
-trading day containing every listed symbol. 45 sessions of history for 60 symbols cost **45
-requests, in 40 seconds**. The same 45 requests would cover all ~2,000 NSE symbols — the cost is
-independent of universe size. (Per-symbol history APIs cost 60 requests for 60 symbols; under a
-rate limit that is the difference between 40 seconds and never finishing.)
+trading day containing every listed symbol. **45 requests gave us 112,624 bars across 2,748
+symbols in about 40 seconds** — and the cost is entirely independent of how many symbols we
+want. Widening from 60 symbols to the whole market cost zero extra requests, because the data
+was already in the files we had downloaded. (A per-symbol history API costs one request per
+symbol; under a rate limit that is the difference between 40 seconds and never finishing —
+measured, see DECISIONS D20.)
 
 **Digests are computed at read time.** Users are absent most of the time, and computing digests
 for absent users is work nobody reads. Cache for 30s to absorb refresh-spam.

@@ -441,3 +441,20 @@ translate at the boundary. A z-score of 1.6 *means* "1.6× a normal day", so we 
 asks how the ranking works. Two audiences, one number, progressive disclosure.
 **Test enforces it:** detector explanations now assert they contain no `σ`, `z-score`, or
 "standard deviation" — jargon cannot silently creep back into user-facing copy.
+
+---
+
+### D36 — 2026-09-04 · Store the whole bhavcopy, not a filtered slice
+**Chose:** import every EQ row from each bhavcopy file — 112,624 bars across 2,748 symbols.
+**Rejected:** the original behaviour, which parsed the whole file and then kept only the 60
+symbols in the curated universe.
+**Why:** filtering saved nothing. The file was already downloaded and parsed; discarding 97%
+of it only guaranteed that any stock a user added outside the universe had no history, so the
+detectors honestly refused to judge it ("we don't have enough history for this stock yet").
+Since a user can add any of ~5,000 listed symbols, the history has to cover them too.
+**Cost:** the same 45 requests — widening to the whole market cost zero extra network calls.
+On disk it took the database from 4.8 MB to 15 MB, which is a good trade for making every
+listed stock work, and still trivial to clone.
+**Verified:** added DMART, TRENT and HAVELLS — none ever in the universe. HAVELLS surfaced a
+card ("fell 3.7% — 3.2× its usual daily move"), the other two got real plain-English verdicts,
+and nothing landed in `unavailable`.

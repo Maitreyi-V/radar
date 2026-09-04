@@ -13,7 +13,6 @@
  */
 import { httpGet } from './http.js';
 import { db } from '../db/index.js';
-import { UNIVERSE_SYMBOLS } from './universe.js';
 import { isTradingDay } from './marketCalendar.js';
 
 const HEADERS = {
@@ -37,9 +36,14 @@ const ALIASES: Record<string, string> = {
   'ZOMATO.NS': 'ETERNAL',
 };
 
-/** Universe tickers without the .NS suffix — bhavcopy uses bare NSE symbols. */
-const WANTED = new Map<string, string>(
-  UNIVERSE_SYMBOLS.map((s) => [(ALIASES[s] ?? s.replace(/\.(NS|BO)$/, '')).toUpperCase(), s]),
+/**
+ * Reverse alias map: the NSE ticker in the file -> the internal symbol we store it under.
+ *
+ * Only needed for the corporate-action cases. Every other row is stored under its own
+ * ticker, because we import the WHOLE file rather than a filtered subset (see below).
+ */
+const ALIAS_TO_INTERNAL = new Map<string, string>(
+  Object.entries(ALIASES).map(([internal, nseTicker]) => [nseTicker.toUpperCase(), internal]),
 );
 
 export interface BhavRow { symbol: string; date: string; open: number | null; high: number | null; low: number | null; close: number; volume: number | null }
@@ -86,6 +90,15 @@ export async function importDay(iso: string): Promise<DayResult> {
   const lines = res.body.split('\n');
   const rows: BhavRow[] = [];
 
+  /**
+   * Import EVERY equity row, not just the curated universe.
+   *
+   * The file is already downloaded and parsed; keeping only 60 of ~2,600 rows saved
+   * nothing and meant that any stock a user added outside the universe had no history,
+   * so the engine honestly refused to judge it. Since a user can add any of ~5,000
+   * listed symbols, the history has to cover them too. One request per day still
+   * covers the entire market — the cost is unchanged, only the discarding was wasteful.
+   */
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line || line.trim() === '') continue;
@@ -93,12 +106,13 @@ export async function importDay(iso: string): Promise<DayResult> {
     const f = line.split(',').map((x) => x.trim());
     const [symbol, series, date1, , open, high, low, , close, , qty] = f;
     if (!symbol || series !== 'EQ') continue;          // ignore non-equity series
-    const full = WANTED.get(symbol.toUpperCase());
-    if (!full) continue;                                // only symbols we track
+    const ticker = symbol.toUpperCase();
+    // Store under our internal name for corporate-action cases, else under its own.
+    const internal = ALIAS_TO_INTERNAL.get(ticker) ?? `${ticker}.NS`;
     const barDate = isoFromBhavDate(date1 ?? '');
     const c = num(close);
     if (!barDate || c === null) continue;
-    rows.push({ symbol: full, date: barDate, open: num(open), high: num(high), low: num(low), close: c, volume: int(qty) });
+    rows.push({ symbol: internal, date: barDate, open: num(open), high: num(high), low: num(low), close: c, volume: int(qty) });
   }
 
   writeRows(rows);

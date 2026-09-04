@@ -29,9 +29,10 @@ async function main(): Promise<void> {
   const cov = db.prepare(
     `SELECT COUNT(*) AS n FROM (SELECT symbol FROM daily_bars GROUP BY symbol HAVING COUNT(*) >= 20)`,
   ).get() as { n: number };
+  const total = db.prepare(`SELECT COUNT(*) n FROM daily_bars`).get() as { n: number };
 
   log(`done: ${ok} days ok, ${missing} missing, ${failed} failed, ${rows} bars written`);
-  log(`symbols with >=20 daily bars: ${cov.n}/60`);
+  log(`${cov.n} symbols now have >=20 sessions of history (${total.n} bars total)`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
