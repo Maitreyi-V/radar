@@ -39,7 +39,9 @@ describe('VOLATILITY_MOVE', () => {
     expect(e!.type).toBe('VOLATILITY_MOVE');
     expect(Math.abs(e!.magnitude)).toBeGreaterThanOrEqual(THRESHOLDS.volatilityZ);
     expect(e!.explanation).toMatch(/rose 5%/);
-    expect(e!.explanation).toMatch(/σ move/);
+    expect(e!.explanation).toMatch(/its usual daily move/);
+    // No statistics jargon in user-facing copy — sigma lives in `detail`, not the sentence.
+    expect(e!.explanation).not.toMatch(/σ|z-score|standard deviation/);
   });
 
   it('THE THESIS: an identical % move fires for a calm stock and not for a wild one', () => {
@@ -91,7 +93,7 @@ describe('VOLUME_SPIKE', () => {
     const e = detectVolumeSpike(ctx({ bars: bars(Array(25).fill(100), Array(25).fill(1000)), volume: 3000 }));
     expect(e).not.toBeNull();
     expect(e!.magnitude).toBeCloseTo(3, 5);
-    expect(e!.explanation).toMatch(/3×/);
+    expect(e!.explanation).toMatch(/3× as many shares/);
   });
 
   it('does not fire just below the threshold', () => {

@@ -130,17 +130,25 @@ Three things follow from taking "explainable" seriously:
 
 ![Why each quiet stock stayed quiet](docs/why-silent.png)
 
-*Expanding "Nothing unusual" shows the arithmetic. Read the **Moved** column against the
-**z-score** column: **PAYTM moved −1.68%, the largest move on the list, and ranks last at
-−0.60σ**, while BEL's smaller −1.38% is −1.14σ. A percentage-sorted watchlist gets this
-exactly backwards.*
+*Expanding "Nothing unusual" explains the silence in plain language. Compare two rows:
+**PAYTM moved +1.22% and reads "a quiet day for this stock"**, while **HDFCBANK moved less at
++0.92% and reads "a bit bigger than its usual day"** — because Paytm normally swings ±2.8% and
+HDFC Bank ±0.9%. The bar shows each stock's ordinary range; the dot shows where today landed.
+No statistics required — and "show the math" reveals the σ and z columns for anyone who wants
+to check the working.*
 
 ### Two rules the whole product hangs on
 
 **Every surfaced event must explain itself in plain English, with its numbers.**
 No unexplained badges, no black-box "AI score":
 
-> *"IDEA rose 3.9% — a 1.7σ move against its own 30-day norm of ±2.3% a day."*
+> *"IDEA rose 3.7% — 1.6× its usual daily move of about ±2.3%."*
+
+Note what that sentence does **not** say. There is no σ, no z-score, no "standard deviation" —
+because a retail investor should not need a statistics background to read their own watchlist.
+A z-score of 1.6 just means *1.6× a normal day*, so that is what we write. The underlying
+numbers stay one click away under "show the math", and in the API payload, for anyone auditing
+the ranking.
 
 **A detector that cannot be confident stays silent.** Fewer than 6 daily bars, zero variance, a
 suspended stock — every detector returns `null` rather than a fabricated number. A made-up

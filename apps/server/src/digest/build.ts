@@ -134,11 +134,13 @@ export function buildDigest(opts: {
         changePct: change === null ? null : round2(change * 100),
         sigmaPct: sigma === null ? null : round2(sigma * 100),
         z: z === null ? null : round2(z),
+        // Plain-English verdict. The z-score stays in the payload for anyone who wants
+        // it, but the sentence a user reads must not require a statistics background.
         reason: sigma === null
-          ? 'not enough price history to judge this stock yet'
+          ? "we don't have enough history for this stock yet"
           : z === null
-            ? 'no baseline price to compare against'
-            : `${Math.abs(round2(z))}σ move — below the ${sensitivity} threshold`,
+            ? 'no earlier price to compare against'
+            : plainVerdict(z),
       });
       continue;
     }
@@ -209,6 +211,22 @@ export function sinceLabel(takenAt: number | null, now: number): string {
   return closed
     ? `${days} day${days === 1 ? '' : 's'} ago — nothing has traded since Friday's close`
     : `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * Turn a z-score into something a person can act on.
+ *
+ * "1.31σ, below the 1.5 threshold" is precise and useless to a retail investor. What they
+ * want to know is whether this is a normal day for this stock. The bands are wide on
+ * purpose — the exact number is available for anyone who asks for it, but the default
+ * reading should be a judgement, not a measurement.
+ */
+export function plainVerdict(z: number): string {
+  const a = Math.abs(z);
+  if (a < 0.5) return 'a quiet day for this stock';
+  if (a < 1.0) return 'a normal-sized move for this stock';
+  if (a < 1.5) return 'a bit bigger than its usual day, but not unusual';
+  return 'close to unusual, just under the line';
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;

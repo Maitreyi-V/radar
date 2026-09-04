@@ -101,7 +101,7 @@ describe('buildDigest', () => {
     const d = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
     expect(d.isQuiet).toBe(false);
     expect(d.cards[0]!.symbol).toBe('MOVER.NS');
-    expect(d.cards[0]!.headline).toMatch(/σ/);
+    expect(d.cards[0]!.headline).toMatch(/its usual daily move/);
     expect(d.cards[0]!.headline).toMatch(/6%/);
     expect(d.quietSymbols).toContain('CALM.NS');   // the quiet one is still accounted for
   });

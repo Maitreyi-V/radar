@@ -424,3 +424,20 @@ digest was still valid by wall-clock TTL. The API was correct the whole time; on
 looked broken, which is worse, because that is what a judge sees. A 30s TTL is right for a
 returning user hammering refresh and wrong when the underlying market changes many times a
 second. The cache is now opt-out for the one caller that genuinely needs live recomputation.
+
+---
+
+### D35 — 2026-09-04 · Say what it means, not what it measures
+**Chose:** all user-facing copy is plain English. "1.6× its usual daily move" instead of
+"a 1.6σ move"; "a quiet day for this stock" instead of "1.31σ — below the 1.5 threshold".
+The σ and z columns are one click away behind **show the math**, and remain in the API payload.
+**Rejected:** surfacing z-scores and σ directly, which is what the first version shipped.
+**Why:** a user pointed at the quiet panel and said, correctly, that nobody outside finance
+knows what a z-score is. They were right, and it undercut the product's central claim: an
+explanation that requires a statistics background is not an explanation, it is a different
+kind of black box. The fix is not to dumb the engine down — the maths is unchanged — but to
+translate at the boundary. A z-score of 1.6 *means* "1.6× a normal day", so we write that.
+**Kept deliberately:** the technical view, because the rigour is a real asset when someone
+asks how the ranking works. Two audiences, one number, progressive disclosure.
+**Test enforces it:** detector explanations now assert they contain no `σ`, `z-score`, or
+"standard deviation" — jargon cannot silently creep back into user-facing copy.

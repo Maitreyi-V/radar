@@ -58,9 +58,12 @@ export function detectVolatilityMove(ctx: SymbolContext): DetectedEvent | null {
       baseline: ctx.checkpointPrice ? 'checkpoint' : 'previous close',
     },
     dedupKey: `${ctx.symbol}:VOLATILITY_MOVE:${ctx.sessionDate}:${Math.abs(z).toFixed(1)}`,
+    // Plain English first. A z-score of 1.6 simply means "1.6x its usual daily move",
+    // which needs no statistics background. The sigma itself stays in `detail` for
+    // anyone who wants to audit the arithmetic.
     explanation:
-      `${short(ctx.symbol)} ${dir(changePct)} ${Math.abs(r1(changePct))}% — a ${Math.abs(r1(z))}σ move ` +
-      `against its own 30-day norm of ±${r1(sigma * 100)}% a day.`,
+      `${short(ctx.symbol)} ${dir(changePct)} ${Math.abs(r1(changePct))}% — ` +
+      `${Math.abs(r1(z))}× its usual daily move of about ±${r1(sigma * 100)}%.`,
   };
 }
 
@@ -81,7 +84,7 @@ export function detectVolumeSpike(ctx: SymbolContext): DetectedEvent | null {
     occurredAt: ctx.asOf,
     detail: { ratio: r2(ratio), volume: ctx.volume, avgVolume: Math.round(avg) },
     dedupKey: `${ctx.symbol}:VOLUME_SPIKE:${ctx.sessionDate}`,
-    explanation: `${short(ctx.symbol)} traded ${r1(ratio)}× its 20-day average volume.`,
+    explanation: `${short(ctx.symbol)} traded ${r1(ratio)}× as many shares as it normally does.`,
   };
 }
 
@@ -135,7 +138,7 @@ export function detectGapOpen(ctx: SymbolContext): DetectedEvent | null {
     dedupKey: `${ctx.symbol}:GAP_OPEN:${ctx.sessionDate}`,
     explanation:
       `${short(ctx.symbol)} opened ${gapPct >= 0 ? 'up' : 'down'} ${Math.abs(r1(gapPct))}% ` +
-      `from the previous close — a ${Math.abs(r1(z))}σ gap.`,
+      `from where it closed — ${Math.abs(r1(z))}× its usual daily move.`,
   };
 }
 
