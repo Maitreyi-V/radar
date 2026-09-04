@@ -396,3 +396,31 @@ visit showed "nothing changed" for someone who had never read what changed. **Ma
 caught up on something they did not read is the one failure this product cannot afford**: the
 whole promise is that it remembers what you saw. It also made the demo fragile, since a judge
 tabbing away would erase the hero moment. Thirty seconds distinguishes a glance from a visit.
+
+---
+
+### D33 — 2026-09-04 · Search the whole market, poll a curated universe
+**Chose:** import the FULL BSE active-equity master (~5,000 rows) into `symbols`, flagged
+`tracked = 1` for the 60 we poll on a schedule and hold recorded tape for. Any symbol can be
+searched and added; symbols outside the universe get their quote fetched **on demand**.
+**Rejected:** importing only the 60 symbols we poll.
+**Why:** found as a user-reported bug, and it was the right kind of embarrassing. The search
+box reads this table, so importing only the polled universe made every other Indian stock
+un-findable — searching "DMART", "TRENT" or "LICI" returned an empty dropdown, and the honest
+conclusion was that adding stocks was broken. **The universe should govern what we POLL, never
+what you can LOOK UP**; I had conflated a scheduling concern with a discovery one.
+Verified: DMART now resolves, adds, and gets a live price (₹3,770) fetched on demand.
+**Consequence for the scale story:** fetching still scales with the symbol universe rather than
+with users — the on-demand path is one request the first time a symbol is added, after which
+it is shared like any other.
+
+---
+
+### D34 — 2026-09-04 · The digest cache must not outlive the facts it summarises
+**Chose:** the replay UI refreshes with `fresh=1`, bypassing the 30s digest cache.
+**Why:** caught in a screenshot. The replay bar advanced — market clock ticking, thousands of
+ticks replayed — while the digest cards sat frozen showing `MARKET CLOSED`, because the cached
+digest was still valid by wall-clock TTL. The API was correct the whole time; only the browser
+looked broken, which is worse, because that is what a judge sees. A 30s TTL is right for a
+returning user hammering refresh and wrong when the underlying market changes many times a
+second. The cache is now opt-out for the one caller that genuinely needs live recomputation.

@@ -14,6 +14,7 @@ import type DatabaseType from 'better-sqlite3';
 const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
   { table: 'symbols', column: 'bse_code', ddl: 'ALTER TABLE symbols ADD COLUMN bse_code TEXT' },
   { table: 'symbols', column: 'mktcap', ddl: 'ALTER TABLE symbols ADD COLUMN mktcap REAL' },
+  { table: 'symbols', column: 'tracked', ddl: 'ALTER TABLE symbols ADD COLUMN tracked INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export function applyColumnMigrations(db: DatabaseType.Database): string[] {

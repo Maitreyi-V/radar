@@ -8,6 +8,11 @@ enough to tell you when nothing happened.
 
 Built for CODE 2026 by Groww · Fri 4 Sep – Mon 7 Sep 2026
 
+![The "Since you left" digest](docs/digest.png)
+
+*Four ranked cards, each explaining itself with its own numbers — and everything else honestly
+collapsed into one row.*
+
 ---
 
 ## Run it in two commands
@@ -123,6 +128,13 @@ Three things follow from taking "explainable" seriously:
 - **Visit history.** The checkpoints themselves are browsable, so the "memory" is visible
   rather than an internal implementation detail.
 
+![Why each quiet stock stayed quiet](docs/why-silent.png)
+
+*Expanding "Nothing unusual" shows the arithmetic. Read the **Moved** column against the
+**z-score** column: **PAYTM moved −1.68%, the largest move on the list, and ranks last at
+−0.60σ**, while BEL's smaller −1.38% is −1.14σ. A percentage-sorted watchlist gets this
+exactly backwards.*
+
 ### Two rules the whole product hangs on
 
 **Every surfaced event must explain itself in plain English, with its numbers.**
@@ -210,6 +222,11 @@ path live data takes. Watch the digest re-rank mid-replay and you are watching t
 not an animation — which is the point. A scripted demo mode would only prove we can write a
 scripted demo mode.
 
+![Replaying Friday's session](docs/replay.png)
+
+*The market clock advances through the recorded session while the digest re-ranks live. Note
+the chip: `REPLAY`, never `LIVE`.*
+
 Replayed rows are written under `source='replay'` so the recorded tape stays pristine and Reset
 is a single `DELETE`. **They are labelled `REPLAY`, never `LIVE`** — see the failure table below.
 
@@ -230,6 +247,8 @@ staleness story.
 | `STALE` | older than 15 minutes |
 | `MARKET CLOSED` | exchange shut — showing the last close |
 | `REPLAY` | **a replayed tick, not live market data** |
+
+![The live watchlist](docs/live.png)
 
 That last row was a bug we caught on screen. Replayed ticks were rendering as `LIVE · 0s ago` —
 *technically true*, since we had generated them a moment earlier, and materially misleading.
@@ -266,6 +285,11 @@ minutes, before we fixed it.
 ## 7. How this scales
 
 The argument is numerical, not architectural buzzwords.
+
+**Search covers the whole market; polling covers a universe.** All ~5,000 active NSE equities
+are searchable and addable. The 60-symbol curated universe is what we poll on a schedule and
+hold recorded tape for; anything else gets its quote fetched on demand the first time someone
+adds it, then shared like any other symbol.
 
 **Fetch dedup is the whole game.** 10,000 users watching stocks drawn from a ~2,000-symbol NSE
 universe means quote fetching scales with **the symbol universe, not with users**. One scheduler
@@ -369,7 +393,7 @@ bug we actually hit.
 
 | Source | Role | Notes |
 |---|---|---|
-| **BSE India** | primary live quotes | no auth, ~1.6 req/s sustained |
+| **BSE India** | primary live quotes + the ~5,000-symbol scrip master | no auth, ~1.6 req/s sustained |
 | **NSE bhavcopy** | daily OHLCV history | one file per session, every listed symbol |
 | **Yahoo v8 chart** | fallback quotes | severe rate limit; kept to exercise the fallback chain |
 

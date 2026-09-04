@@ -15,6 +15,7 @@ import { buildDigest } from '../digest/build.js';
 import { getCached, setCached, invalidate } from '../digest/cache.js';
 import { eventsForSymbol } from '../digest/events.js';
 import { unconfirmed } from '../ingestion/conflict.js';
+import { ensureQuote } from '../ingestion/onDemand.js';
 import { watchlistQuotes, symbolHistory, searchSymbols } from './quotesView.js';
 import { hub } from './sse.js';
 import { marketPhase } from '../ingestion/marketCalendar.js';
@@ -142,8 +143,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const { symbol, version } = (req.body ?? {}) as { symbol?: string; version?: number };
     if (!symbol) return reply.code(400).send({ error: 'symbol is required' });
+    const sym = symbol.toUpperCase();
+    // Fetch a price for symbols outside the scheduled universe BEFORE inserting, so
+    // ref_price ("since you added") is stamped correctly. Best-effort: if the provider
+    // is down the add still succeeds and the digest reports the symbol as unavailable.
+    await ensureQuote(sym);
     try {
-      const wl = addSymbol(user.id, id, symbol.toUpperCase(), version);
+      const wl = addSymbol(user.id, id, sym, version);
       invalidate(id);
       hub.toUser(user.id, { type: 'watchlist', watchlistId: id, version: wl.version });
       return { watchlist: wl };   // 200 even if it was already there — idempotent add

@@ -29,8 +29,12 @@ export default function App() {
   const prices = useRef<Record<string, number>>({});
 
   // ---- bootstrap ----
-  const loadAll = useCallback(async (wid: string, sens = sensitivity) => {
-    const [w, d, all] = await Promise.all([api.watchlist(wid), api.digest(wid, { sensitivity: sens }), api.watchlists()]);
+  const loadAll = useCallback(async (wid: string, sens = sensitivity, fresh = false) => {
+    const [w, d, all] = await Promise.all([
+      api.watchlist(wid),
+      api.digest(wid, { sensitivity: sens, fresh }),
+      api.watchlists(),
+    ]);
     setWatchlist(w.watchlist); setQuotes(w.quotes); setDigest(d.digest); setWatchlists(all.watchlists);
     for (const q of w.quotes) prices.current[q.symbol] = q.price;
   }, [sensitivity]);
@@ -51,6 +55,18 @@ export default function App() {
   const refresh = useCallback(async () => {
     if (watchlist) await loadAll(watchlist.id);
   }, [watchlist, loadAll]);
+
+  /**
+   * Cache-bypassing refresh, used while a replay is running.
+   *
+   * The 30s digest cache is right for ordinary use — it absorbs refresh-spam from a
+   * returning user. But during replay the market state changes many times a second, and
+   * serving a cached digest makes the UI look frozen while the replay bar advances. The
+   * cache must not outlive the facts it summarises, so replay opts out of it.
+   */
+  const refreshLive = useCallback(async () => {
+    if (watchlist) await loadAll(watchlist.id, sensitivity, true);
+  }, [watchlist, loadAll, sensitivity]);
 
   async function changeSensitivity(v: number) {
     setSensitivity(v);
@@ -222,7 +238,7 @@ export default function App() {
       )}
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
-        <ReplayBar onTick={refresh} />
+        <ReplayBar onTick={refreshLive} />
 
         {tab === 'digest' && digest && (
           <>

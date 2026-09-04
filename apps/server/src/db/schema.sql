@@ -93,5 +93,8 @@ CREATE TABLE IF NOT EXISTS symbols (
   name      TEXT NOT NULL,
   exchange  TEXT NOT NULL DEFAULT 'NSE',
   bse_code  TEXT,          -- BSE scripcode; the BSE adapter needs it to fetch a quote
-  mktcap    REAL           -- from the BSE scrip master, in INR crore
+  mktcap    REAL,          -- from the BSE scrip master, in INR crore
+  -- 1 = in our curated universe (recorded tape + scheduled polling).
+  -- 0 = searchable and addable; its quote is fetched on demand.
+  tracked   INTEGER NOT NULL DEFAULT 0
 );
