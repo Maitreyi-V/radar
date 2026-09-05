@@ -67,6 +67,49 @@ export function lastSessionClose(ms: number = Date.now()): number {
   return ms;
 }
 
+/** Epoch ms of the session open (09:15 IST) on the IST date containing `ms`. */
+function sessionOpenOf(ms: number): number {
+  const d = new Date(ms + IST_OFFSET_MS);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0) - IST_OFFSET_MS + OPEN_MIN * 60_000;
+}
+function sessionCloseOf(ms: number): number {
+  const d = new Date(ms + IST_OFFSET_MS);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0) - IST_OFFSET_MS + CLOSE_MIN * 60_000;
+}
+
+/** Milliseconds in one full session. */
+export const SESSION_MS = (CLOSE_MIN - OPEN_MIN) * 60_000;
+
+/**
+ * Milliseconds of ACTUAL TRADING between two instants — weekends, holidays and overnight
+ * gaps contribute zero.
+ *
+ * This is what "how long ago" should mean for a market product. Wall-clock says a Friday
+ * afternoon move is three days old by Monday morning; in trading terms it is the most
+ * recent thing that has happened, because nothing has traded since. Measuring staleness in
+ * wall-clock hours would quietly bury Friday's news over a weekend when it is still the
+ * freshest news there is.
+ */
+export function tradingMsBetween(from: number, to: number): number {
+  if (to <= from) return 0;
+  let total = 0;
+  // Walk IST calendar days from `from` to `to`, summing each session's overlap.
+  let cursor = from;
+  for (let guard = 0; guard < 400 && cursor < to; guard++) {
+    if (isTradingDay(cursor)) {
+      const open = sessionOpenOf(cursor);
+      const close = sessionCloseOf(cursor);
+      const lo = Math.max(from, open);
+      const hi = Math.min(to, close);
+      if (hi > lo) total += hi - lo;
+    }
+    // Advance to the start of the next IST day.
+    const d = new Date(cursor + IST_OFFSET_MS);
+    cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0) - IST_OFFSET_MS;
+  }
+  return total;
+}
+
 export function msUntilClose(ms: number = Date.now()): number {
   if (!isMarketOpen(ms)) return 0;
   return (CLOSE_MIN - ist(ms).minutes) * 60_000;

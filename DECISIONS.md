@@ -458,3 +458,28 @@ listed stock work, and still trivial to clone.
 **Verified:** added DMART, TRENT and HAVELLS — none ever in the universe. HAVELLS surfaced a
 card ("fell 3.7% — 3.2× its usual daily move"), the other two got real plain-English verdicts,
 and nothing landed in `unavailable`.
+
+---
+
+### D37 — 2026-09-05 · Recency decays in TRADING time, not wall-clock
+**Chose:** `recencyDecay` measures age as elapsed **trading** milliseconds — weekends,
+holidays and overnight gaps contribute zero — with a half-life of one session.
+**Rejected:** the original wall-clock half-life of 24h.
+**Why:** caught while verifying the Docker image, one day after the recorded session. The
+digest had gone **completely empty**. Wall-clock decay was burying genuine Friday events over
+a weekend in which the market never opened:
+
+| When | Wall-clock decay | IDEA (base 3.2) |
+|---|---|---|
+| Fri, at the close | 0.998 | 3.19 ✓ |
+| Sun 6 Sep | 0.236 | 0.76 ✗ vanished |
+| Mon 7 Sep 11:00 (deadline) | 0.142 | 0.46 ✗ vanished |
+
+Every judge opening the submission would have seen "Quiet since you left" — the honest empty
+state, firing dishonestly, because the arithmetic was measuring the wrong thing.
+
+The fix is the same principle already established in D9: **for a market product, elapsed time
+means elapsed TRADING time.** A 3-sigma move on Friday afternoon is still the most recent thing
+that has happened when you open the app on Sunday, because nothing has traded since. With the
+fix, that event holds 3.20 all weekend and only begins decaying when Monday's session opens.
+**Verified end to end:** the same three cards render on Saturday that rendered on Friday.

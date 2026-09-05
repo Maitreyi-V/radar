@@ -1,4 +1,5 @@
 import type { DetectedEvent } from './types.js';
+import { tradingMsBetween, SESSION_MS } from '../ingestion/marketCalendar.js';
 
 /**
  * Ranking and the attention budget.
@@ -9,15 +10,24 @@ import type { DetectedEvent } from './types.js';
  * attention, spent on the few things most worth knowing. Two multipliers shape it.
  */
 
-export const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
+/** Half-life is ONE TRADING SESSION, measured in trading time (see below). */
+export const HALF_LIFE_MS = SESSION_MS;
 
 /**
- * Recency: exponential decay halving every 24h.
- * A 3-sigma move yesterday matters more than a 3-sigma move last Tuesday, and after a
- * long absence the digest should lead with what is still actionable, not what is oldest.
+ * Recency: exponential decay halving every trading session.
+ *
+ * The age is measured in TRADING time, not wall-clock time — weekends, holidays and
+ * overnight gaps contribute nothing. A 3-sigma move on Friday afternoon is still the most
+ * recent thing that has happened when you open the app on Sunday, because nothing has
+ * traded since; decaying it by 8x over a weekend would bury the only news there is.
+ *
+ * This matters concretely: with wall-clock decay, a genuine Friday event scored 3.19 at
+ * the close and 0.46 by Monday morning — it silently vanished from the digest over a
+ * weekend in which the market never opened. Same principle as the market-calendar diffing
+ * in DECISIONS D9: for a market product, elapsed time means elapsed TRADING time.
  */
 export function recencyDecay(occurredAt: number, now: number, halfLifeMs = HALF_LIFE_MS): number {
-  const age = Math.max(0, now - occurredAt);
+  const age = tradingMsBetween(occurredAt, now);
   return 0.5 ** (age / halfLifeMs);
 }
 

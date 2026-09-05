@@ -14,18 +14,50 @@ const ev = (over: Partial<DetectedEvent> = {}): DetectedEvent => ({
   ...over,
 });
 
-describe('recencyDecay', () => {
+describe('recencyDecay — measured in TRADING time, not wall-clock', () => {
+  // NOW is Fri 4 Sep 2026, 15:30 IST — the closing bell.
+  const FRI_CLOSE = Date.UTC(2026, 8, 4, 10, 0);
+  const FRI_OPEN = Date.UTC(2026, 8, 4, 3, 45);      // 09:15 IST same day
+  const THU_CLOSE = Date.UTC(2026, 8, 3, 10, 0);
+  const THU_OPEN = Date.UTC(2026, 8, 3, 3, 45);
+
   it('is 1 for something that just happened', () => {
-    expect(recencyDecay(NOW, NOW)).toBe(1);
+    expect(recencyDecay(FRI_CLOSE, FRI_CLOSE)).toBe(1);
   });
 
-  it('halves every 24 hours', () => {
-    expect(recencyDecay(NOW - HALF_LIFE_MS, NOW)).toBeCloseTo(0.5, 10);
-    expect(recencyDecay(NOW - 2 * HALF_LIFE_MS, NOW)).toBeCloseTo(0.25, 10);
+  it('halves over one full trading session', () => {
+    expect(recencyDecay(FRI_OPEN, FRI_CLOSE)).toBeCloseTo(0.5, 6);
+  });
+
+  it('halves again over a second session', () => {
+    // Thursday open -> Friday close spans two complete sessions.
+    expect(recencyDecay(THU_OPEN, FRI_CLOSE)).toBeCloseTo(0.25, 6);
+  });
+
+  it('ignores the overnight gap — only trading hours count', () => {
+    // Thursday's close to Friday's close is ONE session of trading, despite 24h passing.
+    expect(recencyDecay(THU_CLOSE, FRI_CLOSE)).toBeCloseTo(0.5, 6);
+  });
+
+  it('DOES NOT DECAY ACROSS A WEEKEND — nothing traded, so nothing got staler', () => {
+    const sunday = Date.UTC(2026, 8, 6, 12, 0);
+    expect(recencyDecay(FRI_CLOSE, sunday)).toBe(1);
+    // This is not a nicety. With wall-clock decay a genuine Friday event scored 3.19 at
+    // the close and 0.46 by Monday morning — it silently vanished from the digest over a
+    // weekend in which the market never opened.
+    const scored = scoreEvent(ev({ baseScore: 3.2, occurredAt: FRI_CLOSE }), { now: sunday });
+    expect(scored.score).toBeGreaterThan(ATTENTION_THRESHOLD);
+  });
+
+  it('resumes decaying once the market reopens', () => {
+    const monMidSession = Date.UTC(2026, 8, 7, 5, 30);   // Mon 11:00 IST
+    const d = recencyDecay(FRI_CLOSE, monMidSession);
+    expect(d).toBeLessThan(1);        // Monday's trading hours do count
+    expect(d).toBeGreaterThan(0.5);   // but only ~1h45m of them
   });
 
   it('never exceeds 1 for a future timestamp (clock skew)', () => {
-    expect(recencyDecay(NOW + 60_000, NOW)).toBe(1);
+    expect(recencyDecay(FRI_CLOSE + 60_000, FRI_CLOSE)).toBe(1);
   });
 });
 
