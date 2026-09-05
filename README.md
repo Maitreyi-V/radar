@@ -6,6 +6,16 @@ A watchlist that remembers what you last saw, watches while you're gone, and gre
 ranked, explainable digest of what actually changed — never a wall of numbers. It is confident
 enough to tell you when nothing happened.
 
+### ▶ Try it: **https://radar-r8jr.onrender.com**
+
+```
+demo@radar.dev  ·  radar123
+```
+
+*Free instance — the first load may take ~50s while it wakes, then it is instant. Nothing to
+install; the recorded market session ships with it, so the product is fully live even with the
+exchange closed.*
+
 Built for CODE 2026 by Groww · Fri 4 Sep – Mon 7 Sep 2026
 
 ![The "Since you left" digest](docs/digest.png)
@@ -15,7 +25,7 @@ collapsed into one row.*
 
 ---
 
-## Run it in two commands
+## Or run it locally, in two commands
 
 ```bash
 npm install
@@ -47,6 +57,9 @@ Or in Docker — one container, no database service, recorded session baked in:
 ```bash
 docker compose up --build     # -> http://localhost:4000
 ```
+
+This is the same image that runs in production: a multi-stage build (466 MB) serving the
+compiled API and the bundled frontend from a single port.
 
 ---
 
