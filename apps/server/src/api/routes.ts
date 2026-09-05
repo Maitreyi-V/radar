@@ -16,6 +16,7 @@ import { getCached, setCached, invalidate } from '../digest/cache.js';
 import { eventsForSymbol } from '../digest/events.js';
 import { unconfirmed } from '../ingestion/conflict.js';
 import { ensureQuote } from '../ingestion/onDemand.js';
+import { resetDemo, DEMO_EMAIL } from '../demo/reset.js';
 import { watchlistQuotes, symbolHistory, searchSymbols } from './quotesView.js';
 import { hub } from './sse.js';
 import { marketPhase } from '../ingestion/marketCalendar.js';
@@ -82,7 +83,29 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/auth/me', async (req, reply) => {
     const user = currentUser(req);
     if (!user) return reply.code(401).send({ error: 'not authenticated' });
-    return { user, watchlists: listWatchlists(user.id) };
+    // The client uses this to skip the auto-checkpoint and offer a reset control.
+    return { user, watchlists: listWatchlists(user.id), isDemo: user.email === DEMO_EMAIL };
+  });
+
+  /**
+   * Put the shared demo account back to its "since you left" state.
+   *
+   * Restricted to the demo account: it deletes and recreates that user's watchlist, which
+   * would be destructive for anyone else. Everything it writes is derived from recorded
+   * data, so it is reproducible rather than a fixture.
+   */
+  app.post('/api/demo/reset', async (req, reply) => {
+    const user = requireUser(req, reply); if (!user) return;
+    if (user.email !== DEMO_EMAIL) {
+      return reply.code(403).send({ error: 'only the demo account can be reset' });
+    }
+    try {
+      const result = resetDemo(user.id);
+      invalidate(result.watchlistId);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return reply.code(500).send({ error: err?.message ?? 'reset failed' });
+    }
   });
 
   // ---------- watchlists ----------

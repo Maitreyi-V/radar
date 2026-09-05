@@ -83,7 +83,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => req<{ ok: boolean; marketPhase: string; quotes: number; dailyBars: number }>('/api/health'),
 
-  me: () => req<{ user: User; watchlists: Watchlist[] }>('/api/auth/me'),
+  me: () => req<{ user: User; watchlists: Watchlist[]; isDemo: boolean }>('/api/auth/me'),
+  resetDemo: () => req<{ ok: true; watchlistId: string; symbols: number; anchoredTo: string }>(
+    '/api/demo/reset', { method: 'POST' }),
   signup: (email: string, password: string) =>
     req<{ user: User; watchlistId: string }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   login: (email: string, password: string) =>

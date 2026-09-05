@@ -548,3 +548,19 @@ from Friday's tape; once it was Saturday, "the previous session" WAS Friday, so 
 compared Friday against Friday, every move computed as 0.00%, and the hero moment quietly
 emptied. Deriving the anchor from the data makes the demo identical whether a judge opens it
 on Friday evening or Monday morning — which, given the judging window, is the whole point.
+
+---
+
+### D42 — 2026-09-05 · A shared demo account needs a reset, not a disabled feature
+**Chose:** exempt the demo account from the tab-hide auto-checkpoint, and add a one-click
+**Reset demo** control (`POST /api/demo/reset`, restricted to that account).
+**Why:** found on the live deployment. The auto-checkpoint is correct product behaviour —
+leaving means you are caught up — but the demo account is opened by many people in turn, so
+the first visitor who read for thirty seconds and switched tabs moved the anchor, and everyone
+after them landed on "Quiet since you left". **The feature, working exactly as designed,
+quietly destroyed the thing it exists to demonstrate.**
+**Rejected:** removing the auto-checkpoint. It is the right behaviour for a real user; the
+problem is shared identity, not the feature.
+The reset is derived entirely from recorded data — no fixtures — so it reproduces the same
+digest whichever day it runs, and a judge who lands on an emptied demo can restore it in one
+click rather than concluding the product is broken.

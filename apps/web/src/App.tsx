@@ -19,6 +19,7 @@ export default function App() {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [watchlist, setWatchlist] = useState<Watchlist | null>(null);
   const [sensitivity, setSensitivity] = useState(1.5);
+  const [isDemo, setIsDemo] = useState(false);
   const [quotes, setQuotes] = useState<QuoteView[]>([]);
   const [digest, setDigest] = useState<Digest | null>(null);
   const [tab, setTab] = useState<Tab>('digest');
@@ -41,8 +42,9 @@ export default function App() {
 
   useEffect(() => {
     api.me()
-      .then(async ({ user, watchlists }) => {
+      .then(async ({ user, watchlists, isDemo }) => {
         setUser(user);
+        setIsDemo(!!isDemo);
         setWatchlists(watchlists);
         const remembered = localStorage.getItem('radar.activeWatchlist');
         const wl = watchlists.find((w) => w.id === remembered) ?? watchlists[0];
@@ -120,12 +122,28 @@ export default function App() {
     if (!watchlist) return;
     const onHide = () => {
       if (document.visibilityState !== 'hidden') return;
+      // The demo account is shared. Moving its anchor is correct for a real user and
+      // destructive here — the next visitor would land on "Quiet since you left".
+      if (isDemo) return;
       if (Date.now() - arrivedAt.current < MIN_DWELL_MS) return;   // a glance, not a visit
       try { navigator.sendBeacon(`/api/watchlists/${watchlist.id}/checkpoint`); } catch { /* best effort */ }
     };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
-  }, [watchlist]);
+  }, [watchlist, isDemo]);
+
+  async function resetDemo() {
+    setBusy(true);
+    try {
+      const r = await api.resetDemo();
+      localStorage.setItem('radar.activeWatchlist', r.watchlistId);
+      await loadAll(r.watchlistId);
+      setTab('digest');
+      setNotice(`Demo reset — you are back to the close of ${r.anchoredTo}.`);
+      setTimeout(() => setNotice(null), 4000);
+    } catch (e) { await handleConflict(e); }
+    finally { setBusy(false); }
+  }
 
   // ---- live updates ----
   useStream(!!user, (ev) => {
@@ -219,10 +237,18 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-3">
             <AddSymbol onAdd={add} existing={watchlist?.symbols ?? []} />
+            {isDemo && (
+              <button onClick={resetDemo} disabled={busy}
+                title="Put the shared demo account back to its 'since you left' state"
+                className="text-xs text-slate-500 hover:text-accent">
+                Reset demo
+              </button>
+            )}
             <button
               onClick={async () => {
                 // Leaving is a "caught up" moment — anchor the diff before the session ends.
-                if (watchlist) { try { await api.checkpoint(watchlist.id); } catch { /* still sign out */ } }
+                // Skipped for the shared demo account, which many people open in turn.
+                if (watchlist && !isDemo) { try { await api.checkpoint(watchlist.id); } catch { /* still sign out */ } }
                 await api.logout();
                 location.reload();
               }}
