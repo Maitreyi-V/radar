@@ -45,12 +45,26 @@ function main(): void {
   const userId = user.id;
   const wl = createWatchlist(userId, 'Demo Watchlist');
 
-  // The most recent completed session — the one before today.
-  const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  /**
+   * Anchor to the session BEFORE the one we have recorded prices for — not "yesterday".
+   *
+   * The demo's current prices come from the recorded tape (Friday 4 Sep). Anchoring the
+   * checkpoint to the previous *calendar* session breaks as soon as the wall clock moves
+   * past that day: once it is Saturday, "the previous session" IS Friday, so the digest
+   * compares Friday against Friday, every move is 0.00%, and the hero moment silently
+   * empties out. Deriving the anchor from the DATA rather than from today's date keeps the
+   * demo identical whether a judge opens it on Friday evening or Monday morning.
+   */
+  const recorded = db.prepare(
+    `SELECT MAX(session_date) AS d FROM quotes WHERE source = 'bse-intraday'`,
+  ).get() as { d: string | null };
+  if (!recorded.d) throw new Error('no recorded session in quotes — run `npm run tape` first');
+
   const prev = db.prepare(
     `SELECT DISTINCT bar_date FROM daily_bars WHERE bar_date < ? ORDER BY bar_date DESC LIMIT 1`,
-  ).get(today) as { bar_date: string } | undefined;
-  if (!prev) throw new Error('no daily_bars — run `npm run bhavcopy` first');
+  ).get(recorded.d) as { bar_date: string } | undefined;
+  if (!prev) throw new Error('no daily_bars before the recorded session — run `npm run bhavcopy` first');
+  console.log(`recorded session: ${recorded.d} -> anchoring checkpoint to the close of ${prev.bar_date}`);
 
   const takenAt = closeInstant(prev.bar_date);
   const closeOn = db.prepare(`SELECT close, volume FROM daily_bars WHERE symbol = ? AND bar_date = ?`);

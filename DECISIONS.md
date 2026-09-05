@@ -517,3 +517,34 @@ and it is strictly faster besides. Safe here because nothing mutates statement s
 (`.pluck()`, `.raw()`, `.bind()`), which is the one thing that would make sharing unsound.
 **Only reproducible in the container**, under sustained load, which is exactly why building
 and running the image before deploying was worth the time.
+
+---
+
+### D40 — 2026-09-05 · better-sqlite3 11 → 13 (the deploy failure)
+**Chose:** upgrade `better-sqlite3` from 11.10.0 to 13.0.3.
+**Why:** the first Render deploy failed, and reproducing it locally on **linux/amd64** — the
+platform Render runs, versus the arm64 of a Mac — showed the process aborting at startup:
+
+```
+node[1]: void node::RemoveEnvironmentCleanupHook(...) at ../src/api/hooks.cc:142
+Assertion failed: (env) != nullptr
+```
+
+better-sqlite3 11.x predates Node 24 and its native cleanup hooks are incompatible with it;
+13.x declares `engines: node >= 22`. On arm64 the same mismatch only surfaced under replay
+load, which is why it read as a statement-lifetime problem at first. The prepared-statement
+cache from D39 is still right — reusing statements is what the library asks for, and it is
+faster — but it was treating a symptom.
+**Lesson:** build and run the actual production image on the actual production architecture
+before deploying. `npm run dev` on a Mac passed every test while the container aborted on boot.
+
+---
+
+### D41 — 2026-09-05 · Derive the demo anchor from the data, not from today's date
+**Chose:** the seed anchors its checkpoint to the session *before the most recent recorded
+session in the database*, rather than "the previous calendar session".
+**Why:** the old logic broke the moment the wall clock passed the recorded day. Our prices come
+from Friday's tape; once it was Saturday, "the previous session" WAS Friday, so the digest
+compared Friday against Friday, every move computed as 0.00%, and the hero moment quietly
+emptied. Deriving the anchor from the data makes the demo identical whether a judge opens it
+on Friday evening or Monday morning — which, given the judging window, is the whole point.
