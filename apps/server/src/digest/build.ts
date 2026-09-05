@@ -76,14 +76,16 @@ export function buildDigest(opts: {
   const sensitivity = opts.sensitivity ?? ATTENTION_THRESHOLD;
 
   const items = itemsStmt.all(opts.watchlistId) as ItemRow[];
-  // Novelty damping needs the symbols surfaced in RECENT digests. Before events were
-  // persisted this was always empty, so novelty() silently returned 1.0 for everything.
-  const history = opts.recentDigestSymbols ?? recentDigestSymbols(opts.watchlistId);
   const cp = checkpointStmt.get(opts.watchlistId, opts.userId) as
     | { takenAt: number; snapshot: string }
     | undefined;
 
   const snapshot: Record<string, { price: number }> = cp ? safeParse(cp.snapshot) : {};
+
+  // Novelty damping needs the symbols surfaced in PRIOR digests. Bounded by this
+  // checkpoint so the current window's own events cannot damp themselves — otherwise
+  // viewing the digest changes it, and cards drop out on refresh.
+  const history = opts.recentDigestSymbols ?? recentDigestSymbols(opts.watchlistId, cp?.takenAt);
 
   // A digest built from replayed ticks must NOT write into the user's real event
   // history. Replay is a simulation; letting it record events would damp novelty for

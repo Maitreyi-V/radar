@@ -61,16 +61,23 @@ export function eventsForSymbol(symbol: string, since?: number, limit = 40): Sto
 
 /**
  * The symbols surfaced in the user's recent digests, newest first — the input novelty
- * damping needs. Buckets by digest occasion (checkpoint) rather than by wall-clock day,
- * because "recent digests" means recent VISITS, not recent dates.
+ * damping needs.
+ *
+ * `before` MUST be the current checkpoint. Novelty exists to damp stocks that were noisy
+ * in PREVIOUS visits; events from the window being computed right now are this visit's
+ * news and must not damp themselves. Without that bound the digest is not idempotent:
+ * viewing it records its own events, and the next refresh scores those same stocks 0.7x,
+ * so cards silently drop out on reload — observed live, 4 cards becoming 3.
  */
-export function recentDigestSymbols(watchlistId: string, buckets = 3): string[][] {
+export function recentDigestSymbols(watchlistId: string, before?: number, buckets = 3): string[][] {
+  const cutoff = before ?? Number.MAX_SAFE_INTEGER;
   const rows = db.prepare(`
     SELECT DISTINCT e.symbol, e.occurred_at AS occurredAt
     FROM events e
     WHERE e.symbol IN (SELECT symbol FROM watchlist_items WHERE watchlist_id = ?)
+      AND e.occurred_at < ?
     ORDER BY e.occurred_at DESC LIMIT 200
-  `).all(watchlistId) as Array<{ symbol: string; occurredAt: number }>;
+  `).all(watchlistId, cutoff) as Array<{ symbol: string; occurredAt: number }>;
 
   if (rows.length === 0) return [];
 

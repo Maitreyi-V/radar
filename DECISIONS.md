@@ -564,3 +564,19 @@ problem is shared identity, not the feature.
 The reset is derived entirely from recorded data — no fixtures — so it reproduces the same
 digest whichever day it runs, and a judge who lands on an emptied demo can restore it in one
 click rather than concluding the product is broken.
+
+---
+
+### D43 — 2026-09-05 · Novelty damps PRIOR visits only; a digest must survive a refresh
+**Chose:** `recentDigestSymbols` is bounded by the current checkpoint, so only events from
+*previous* visits feed novelty damping.
+**Why:** the digest was not idempotent. Building it records its events (D28); novelty then
+read those same events back and scored those stocks 0.7x on the next view. Refreshing the page
+therefore *changed what it showed* — observed live, four cards quietly becoming three.
+A user reloading the same digest and finding a stock gone would reasonably conclude the
+product was unreliable, and it would have been alarming mid-demo.
+Novelty exists to stop one permanently jumpy stock monopolising *successive* digests. Events
+inside the window being computed are this visit's news; letting them damp themselves was a
+scoping error, not a tuning problem.
+**Locked in by test:** `build.test.ts` now asserts three consecutive builds return identical
+symbols, scores and quiet counts.

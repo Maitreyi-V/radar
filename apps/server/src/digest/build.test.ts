@@ -130,6 +130,21 @@ describe('buildDigest', () => {
     expect(d.unavailable).toContain('GHOST.NS');
   });
 
+  it('IS IDEMPOTENT ACROSS REFRESHES — viewing the digest must not change it', () => {
+    // Regression guard. Building a digest records its events; novelty damping then read
+    // those same events back and scored the stocks 0.7x on the next view, so cards
+    // silently dropped out on reload (observed live: 4 cards became 3). Novelty must
+    // only consider PRIOR visits, never the window being computed.
+    const first = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
+    const second = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
+    const third = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
+
+    expect(second.cards.map((c) => c.symbol)).toEqual(first.cards.map((c) => c.symbol));
+    expect(third.cards.map((c) => c.symbol)).toEqual(first.cards.map((c) => c.symbol));
+    expect(second.cards.map((c) => c.score)).toEqual(first.cards.map((c) => c.score));
+    expect(third.quietCount).toBe(first.quietCount);
+  });
+
   it('is a pure function of stored state — recomputing gives an identical result', () => {
     const a = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
     const b = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
