@@ -1,0 +1,24 @@
+# One-click deploy: https://render.com → New → Blueprint → point at this repo.
+#
+# A single web service. No database service, because SQLite is the database and the
+# recorded Friday session is baked into the image (see DECISIONS.md D2).
+#
+# The free plan has no persistent disk, which is fine here on purpose: the entrypoint
+# seeds /data from the image on every cold boot, so the app always comes up with the
+# recorded session and a clean demo account. Nothing that matters is lost on restart —
+# the tape lives in the repo, not in the container.
+services:
+  - type: web
+    name: radar
+    runtime: docker
+    plan: free
+    region: singapore          # closest to the NSE data sources and to Indian judges
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: RADAR_DB
+        value: /data/radar.db

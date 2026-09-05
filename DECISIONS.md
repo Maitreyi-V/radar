@@ -483,3 +483,37 @@ means elapsed TRADING time.** A 3-sigma move on Friday afternoon is still the mo
 that has happened when you open the app on Sunday, because nothing has traded since. With the
 fix, that event holds 3.20 all weekend and only begins decaying when Monday's session opens.
 **Verified end to end:** the same three cards render on Saturday that rendered on Friday.
+
+---
+
+### D38 — 2026-09-05 · Multi-stage image; compile, don't ship a TypeScript loader
+**Chose:** a builder stage with the toolchain that compiles the server to plain JS and bundles
+the frontend, then a runtime stage carrying only pruned `node_modules` and built output.
+**Result:** **1.14 GB → 466 MB**, and the container boots with `node dist/index.js` instead of
+a TypeScript loader.
+**Why:** the single-stage image shipped python3, make, g++ and every dev dependency into
+production — none of which run anything. On a free hosting tier that is the difference between
+a build that completes and one that times out.
+
+---
+
+### D39 — 2026-09-05 · Cache prepared statements (a hard crash, found only in the container)
+**Chose:** memoise `db.prepare()` by SQL text at the point the database is opened.
+**Why:** the containerised build died with **exit 133** whenever a replay started:
+
+```
+node[1]: void node::RemoveEnvironmentCleanupHook(...) at ../src/api/hooks.cc:142
+Assertion failed: (env) != nullptr
+```
+
+better-sqlite3 expects statements to be prepared once and reused. About 30 call sites prepared
+inside the function instead, so replay — thousands of statement creations a second — produced
+enough garbage Statement objects that their native destructors ran during teardown and
+tripped an assertion in Node itself. Not a JavaScript exception: an immediate process abort.
+**Fixed at one point rather than thirty.** Hand-editing every call site would have worked and
+then decayed, because nothing would stop the next `db.prepare()` inside a handler. Installing
+the cache on the database means every caller — including future ones — gets reuse for free,
+and it is strictly faster besides. Safe here because nothing mutates statement state
+(`.pluck()`, `.raw()`, `.bind()`), which is the one thing that would make sharing unsound.
+**Only reproducible in the container**, under sustained load, which is exactly why building
+and running the image before deploying was worth the time.

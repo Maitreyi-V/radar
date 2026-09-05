@@ -13,7 +13,9 @@
     "bhavcopy": "tsx src/cli/bhavcopy.ts",
     "explain": "tsx src/cli/explain.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json && cp src/db/schema.sql dist/db/schema.sql",
+    "start:prod": "node dist/index.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
