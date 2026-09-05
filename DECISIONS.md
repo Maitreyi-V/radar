@@ -580,3 +580,21 @@ inside the window being computed are this visit's news; letting them damp themse
 scoping error, not a tuning problem.
 **Locked in by test:** `build.test.ts` now asserts three consecutive builds return identical
 symbols, scores and quiet counts.
+
+---
+
+### D44 — 2026-09-05 · Let SSE stream; stop polling on top of it
+**Chose:** during replay the client refreshes only the DIGEST, every 3s. Prices in the live
+table come from SSE alone.
+**Rejected:** the original 1.2s `loadAll()` on every replay tick.
+**Why:** reported as "the whole screen is glitching". `loadAll()` refetched the watchlist,
+the digest and the quotes together and **replaced the entire quotes array**, so several times
+a second every row remounted and every sparkline redrew — on top of the SSE flash animation
+firing on the same rows. Two update mechanisms were fighting: the streaming one was already
+correct and updating prices in place, and the polling one was tearing the table down and
+rebuilding it underneath.
+This is the argument for SSE made concrete (D-SSE-over-WebSockets): if you have a push
+channel, trust it. Polling "just to be safe" is not belt-and-braces, it is a second source of
+truth racing the first.
+**Also:** flashes now require a move above 0.05%, so dozens of simultaneous ticks stop
+shimmering. A flash that fires on everything highlights nothing.

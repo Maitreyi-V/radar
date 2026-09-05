@@ -59,16 +59,25 @@ export default function App() {
   }, [watchlist, loadAll]);
 
   /**
-   * Cache-bypassing refresh, used while a replay is running.
+   * Replay tick handler — refreshes ONLY the digest.
    *
-   * The 30s digest cache is right for ordinary use — it absorbs refresh-spam from a
-   * returning user. But during replay the market state changes many times a second, and
-   * serving a cached digest makes the UI look frozen while the replay bar advances. The
-   * cache must not outlive the facts it summarises, so replay opts out of it.
+   * Two things this deliberately does not do:
+   *
+   * 1. It does not refetch quotes. SSE already pushes each replayed tick and updates
+   *    prices in place. Refetching replaced the whole quotes array several times a
+   *    second, so every row remounted and every sparkline redrew — which, on top of the
+   *    price-flash animation, made the live table visibly glitch. The streaming update
+   *    was already correct; the polling was fighting it.
+   *
+   * 2. It bypasses the 30s digest cache, because during replay the market state changes
+   *    many times a second and a cached digest makes the UI look frozen while the replay
+   *    clock advances. A cache must not outlive the facts it summarises.
    */
   const refreshLive = useCallback(async () => {
-    if (watchlist) await loadAll(watchlist.id, sensitivity, true);
-  }, [watchlist, loadAll, sensitivity]);
+    if (!watchlist) return;
+    const d = await api.digest(watchlist.id, { sensitivity, fresh: true });
+    setDigest(d.digest);
+  }, [watchlist, sensitivity]);
 
   async function changeSensitivity(v: number) {
     setSensitivity(v);
@@ -149,10 +158,13 @@ export default function App() {
   useStream(!!user, (ev) => {
     if (ev.type === 'quote') {
       const prev = prices.current[ev.symbol];
-      if (prev !== undefined && prev !== ev.price) {
+      // Flash only on a move the eye can register. During replay dozens of symbols tick
+      // every second, and flashing all of them made the table shimmer rather than draw
+      // attention — the signal became noise.
+      if (prev !== undefined && prev !== ev.price && Math.abs((ev.price - prev) / prev) > 0.0005) {
         const dir = ev.price > prev ? 'up' : 'down';
         setFlash((f) => ({ ...f, [ev.symbol]: dir }));
-        setTimeout(() => setFlash((f) => ({ ...f, [ev.symbol]: undefined })), 900);
+        setTimeout(() => setFlash((f) => ({ ...f, [ev.symbol]: undefined })), 700);
       }
       prices.current[ev.symbol] = ev.price;
       setQuotes((qs) => qs.map((q) => (q.symbol === ev.symbol

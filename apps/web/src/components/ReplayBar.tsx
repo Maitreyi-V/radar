@@ -27,10 +27,16 @@ export function ReplayBar({ onTick }: { onTick: () => void }) {
 
   useEffect(() => { void load(); }, []);
 
-  // Poll only while a replay is actually moving.
+  /**
+   * Poll only while a replay is actually moving, and not too often.
+   *
+   * 1.2s was fast enough to be indistinguishable from live streaming while forcing a
+   * digest recompute several times a second. 3s keeps the progress bar and market clock
+   * feeling continuous; prices themselves arrive over SSE and do not wait for this.
+   */
   useEffect(() => {
     if (status?.state !== 'running') return;
-    const t = setInterval(() => { void load(); onTick(); }, 1200);
+    const t = setInterval(() => { void load(); onTick(); }, 3000);
     return () => clearInterval(t);
   }, [status?.state, onTick]);
 

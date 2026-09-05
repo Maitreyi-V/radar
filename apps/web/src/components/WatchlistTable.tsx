@@ -39,8 +39,9 @@ export function WatchlistTable({ quotes, onRemove, onOpen, flash }: {
             const f = flash[q.symbol];
             return (
               <tr key={q.symbol}
-                  className={`border-b border-ink-850 last:border-0 hover:bg-ink-850/50 transition-colors
-                    ${f === 'up' ? 'bg-up/5' : f === 'down' ? 'bg-down/5' : ''}`}>
+                  className={`border-b border-ink-850 last:border-0 hover:bg-ink-850/50
+                    transition-colors duration-500
+                    ${f === 'up' ? 'bg-up/[0.03]' : f === 'down' ? 'bg-down/[0.03]' : ''}`}>
                 <td className="px-4 py-3">
                   <button onClick={() => onOpen(q.symbol)} className="text-left group">
                     <div className="font-medium text-slate-100 group-hover:text-accent transition-colors">
