@@ -16,7 +16,7 @@ import { getCached, setCached, invalidate } from '../digest/cache.js';
 import { eventsForSymbol } from '../digest/events.js';
 import { unconfirmed } from '../ingestion/conflict.js';
 import { ensureQuote } from '../ingestion/onDemand.js';
-import { resetDemo, DEMO_EMAIL } from '../demo/reset.js';
+import { resetDemo, recordedDemoContext, DEMO_EMAIL } from '../demo/reset.js';
 import { watchlistQuotes, symbolHistory, searchSymbols } from './quotesView.js';
 import { hub } from './sse.js';
 import { marketPhase } from '../ingestion/marketCalendar.js';
@@ -33,6 +33,18 @@ function requireUser(req: FastifyRequest, reply: FastifyReply): User | null {
   const u = currentUser(req);
   if (!u) { void reply.code(401).send({ error: 'not authenticated' }); return null; }
   return u;
+}
+
+/** Recorded demo data gets its own stable clock until an actual replay is running. */
+function dataContext(user: User): {
+  now?: number; mode: 'CURRENT' | 'RECORDED' | 'REPLAY'; sessionDate?: string;
+} {
+  const status = replay.status();
+  const hasReplay = status.state !== 'idle' || status.emitted > 0;
+  if (hasReplay) return { mode: 'REPLAY', sessionDate: status.sessionDate ?? undefined };
+  if (user.email !== DEMO_EMAIL) return { mode: 'CURRENT' };
+  const recorded = recordedDemoContext();
+  return { now: recorded.now, mode: 'RECORDED', sessionDate: recorded.sessionDate };
 }
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -100,6 +112,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ error: 'only the demo account can be reset' });
     }
     try {
+      // "Reset demo" means reset the whole demo, including any finished replay.
+      replay.reset();
       const result = resetDemo(user.id);
       invalidate(result.watchlistId);
       return { ok: true, ...result };
@@ -158,7 +172,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const user = requireUser(req, reply); if (!user) return;
     const wl = getWatchlist(user.id, (req.params as { id: string }).id);
     if (!wl) return reply.code(404).send({ error: 'watchlist not found' });
-    return { watchlist: wl, quotes: watchlistQuotes(wl.id) };
+    const context = dataContext(user);
+    return { watchlist: wl, quotes: watchlistQuotes(wl.id, context.now, context.mode) };
   });
 
   app.post('/api/watchlists/:id/symbols', async (req, reply) => {
@@ -212,12 +227,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const fresh = (req.query as { fresh?: string }).fresh === '1';
     const sens = (req.query as { sensitivity?: string }).sensitivity;
     const sensitivity = sens === undefined ? undefined : Number(sens);
-    const cacheKey = limit + (sensitivity ?? 0) * 1000;   // sensitivity is part of the identity
+    const context = dataContext(user);
+    const modeKey = context.mode === 'RECORDED' ? 1_000_000 : context.mode === 'REPLAY' ? 2_000_000 : 0;
+    const cacheKey = limit + (sensitivity ?? 0) * 1000 + modeKey;
     if (!fresh) {
       const cached = getCached(user.id, id, cacheKey);
       if (cached) return { digest: cached, cached: true };
     }
-    const digest = buildDigest({ userId: user.id, watchlistId: id, limit, sensitivity });
+    const digest = buildDigest({
+      userId: user.id, watchlistId: id, limit, sensitivity,
+      now: context.now, dataMode: context.mode, dataSessionDate: context.sessionDate,
+    });
     setCached(user.id, id, cacheKey, digest);
     return { digest, cached: false };
   });
@@ -226,7 +246,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const user = requireUser(req, reply); if (!user) return;
     const { id } = req.params as { id: string };
     if (!getWatchlist(user.id, id)) return reply.code(404).send({ error: 'watchlist not found' });
-    return { quotes: watchlistQuotes(id) };
+    const context = dataContext(user);
+    return { quotes: watchlistQuotes(id, context.now, context.mode) };
   });
 
   // ---------- symbols ----------

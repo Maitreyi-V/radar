@@ -168,7 +168,8 @@ export default function App() {
       }
       prices.current[ev.symbol] = ev.price;
       setQuotes((qs) => qs.map((q) => (q.symbol === ev.symbol
-        ? { ...q, price: ev.price, asOf: ev.asOf, ageMs: 0, freshness: 'LIVE' as const }
+        ? { ...q, price: ev.price, asOf: ev.asOf, ageMs: 0,
+            freshness: ev.source === 'replay' ? 'REPLAY' as const : 'LIVE' as const }
         : q)));
     }
     // A checkpoint taken in ANOTHER tab must refresh this one's digest.
@@ -276,7 +277,7 @@ export default function App() {
       )}
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
-        <ReplayBar onTick={refreshLive} />
+        <ReplayBar onTick={refreshLive} onReset={refresh} />
 
         {tab === 'digest' && digest && (
           <>

@@ -1,6 +1,7 @@
 import type { ScoredEvent } from '../significance/score.js';
 
-export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'REPLAY';
+export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'RECORDED' | 'REPLAY';
+export type DataMode = 'CURRENT' | 'RECORDED' | 'REPLAY';
 
 export interface DigestCard {
   symbol: string;
@@ -20,6 +21,10 @@ export interface DigestCard {
 
 export interface Digest {
   watchlistId: string;
+  /** Whether this digest is based on current, recorded-demo, or actively replayed data. */
+  dataMode: DataMode;
+  /** Trading date behind recorded/replayed data. Null for the current feed. */
+  dataSessionDate: string | null;
   /** The checkpoint this digest is measured against. Null on a first-ever visit. */
   since: number | null;
   sinceLabel: string;

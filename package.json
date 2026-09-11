@@ -5,6 +5,9 @@
   "workspaces": ["apps/server", "apps/web"],
   "scripts": {
     "dev": "npm run dev --workspace=apps/server & npm run dev --workspace=apps/web",
-    "test": "npm run test --workspace=apps/server"
+    "test": "npm run test --workspace=apps/server",
+    "build": "npm run build --workspace=apps/server && npm run build --workspace=apps/web",
+    "explain": "npm run explain --workspace=apps/server",
+    "seed": "npm run seed --workspace=apps/server"
   }
 }

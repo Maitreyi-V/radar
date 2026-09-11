@@ -1,5 +1,6 @@
 /** Types mirroring the server contract. Kept hand-written and small rather than generated. */
-export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'REPLAY';
+export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'RECORDED' | 'REPLAY';
+export type DataMode = 'CURRENT' | 'RECORDED' | 'REPLAY';
 
 export interface QuoteView {
   symbol: string; name: string; price: number; volume: number | null;
@@ -29,7 +30,8 @@ export interface QuietDetail {
 }
 
 export interface Digest {
-  watchlistId: string; since: number | null; sinceLabel: string; generatedAt: number;
+  watchlistId: string; dataMode: DataMode; dataSessionDate: string | null;
+  since: number | null; sinceLabel: string; generatedAt: number;
   cards: DigestCard[]; quietCount: number; quietSymbols: string[]; isQuiet: boolean;
   marketPhase: 'OPEN' | 'PRE_OPEN' | 'CLOSED'; unavailable: string[];
   unconfirmed: Array<{ symbol: string; reason: string }>;

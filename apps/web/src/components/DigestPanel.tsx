@@ -14,6 +14,12 @@ import { QuietPanel } from './QuietPanel';
 export function DigestPanel({ digest, onOpen, onCaughtUp, busy }: {
   digest: Digest; onOpen: (s: string) => void; onCaughtUp: () => void; busy: boolean;
 }) {
+  const recordedDate = digest.dataSessionDate
+    ? new Date(`${digest.dataSessionDate}T00:00:00+05:30`).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
+      })
+    : null;
+
   return (
     <section>
       <header className="flex items-end justify-between gap-4 mb-3">
@@ -22,7 +28,11 @@ export function DigestPanel({ digest, onOpen, onCaughtUp, busy }: {
             {digest.since === null ? 'Welcome to Radar' : 'Since you left'}
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            {digest.since === null
+            {digest.dataMode === 'RECORDED'
+              ? `Demo scenario: you last checked at the previous close. Analysing the recorded ${recordedDate} session.`
+              : digest.dataMode === 'REPLAY'
+                ? `Replay scenario: you last checked at the previous close. Watching the recorded ${recordedDate} session unfold.`
+              : digest.since === null
               ? 'Add a few stocks, then mark yourself caught up. Next time you return, this is where what changed will appear.'
               : `You were last here ${digest.sinceLabel}.`}
           </p>

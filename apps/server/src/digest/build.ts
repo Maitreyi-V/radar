@@ -4,7 +4,7 @@ import type { SymbolContext } from '../significance/types.js';
 import { detectAll, short } from '../significance/detectors.js';
 import { rank, ATTENTION_THRESHOLD, type ScoredEvent } from '../significance/score.js';
 import { volatility } from '../significance/stats.js';
-import type { Digest, DigestCard, Freshness } from './types.js';
+import type { DataMode, Digest, DigestCard, Freshness } from './types.js';
 import { marketPhase, sessionDate, lastSessionClose } from '../ingestion/marketCalendar.js';
 import { STALENESS } from '../config.js';
 import { recordEvents, recentDigestSymbols } from './events.js';
@@ -19,9 +19,15 @@ import { unconfirmed } from '../ingestion/conflict.js';
  * That would be technically true and materially misleading, which is exactly the kind
  * of quiet lie this product exists to refuse.
  */
-export function freshnessOf(asOf: number, now: number, source?: string): Freshness {
+export function freshnessOf(asOf: number, now: number, source?: string, dataMode: DataMode = 'CURRENT'): Freshness {
   if (source === 'replay') return 'REPLAY';
-  if (marketPhase(now) !== 'OPEN') return 'MARKET_CLOSED';
+  if (dataMode === 'RECORDED') return 'RECORDED';
+  if (marketPhase(now) !== 'OPEN') {
+    // "Market closed" is only honest when this quote belongs to the most recent
+    // completed session. An older quote is stale even though the market is shut now.
+    if (asOf < lastSessionClose(now) - STALENESS.delayed) return 'STALE';
+    return 'MARKET_CLOSED';
+  }
   const age = now - asOf;
   if (age <= STALENESS.live) return 'LIVE';
   if (age <= STALENESS.delayed) return 'DELAYED';
@@ -70,10 +76,14 @@ export function buildDigest(opts: {
   recentDigestSymbols?: string[][];
   /** Attention threshold. Lower = more surfaces. Defaults to ATTENTION_THRESHOLD. */
   sensitivity?: number;
+  /** Explicit context for deterministic recorded-data demos. */
+  dataMode?: DataMode;
+  dataSessionDate?: string;
 }): Digest {
   const now = opts.now ?? Date.now();
   const limit = opts.limit ?? 5;
   const sensitivity = opts.sensitivity ?? ATTENTION_THRESHOLD;
+  let dataMode = opts.dataMode ?? 'CURRENT';
 
   const items = itemsStmt.all(opts.watchlistId) as ItemRow[];
   const cp = checkpointStmt.get(opts.watchlistId, opts.userId) as
@@ -101,7 +111,10 @@ export function buildDigest(opts: {
     const q = latestStmt.get(item.symbol) as QuoteRow | undefined;
     if (!q) { unavailable.push(item.symbol); continue; }   // surfaced, not silently dropped
 
-    if (q.source === 'replay') builtFromReplay = true;
+    if (q.source === 'replay') {
+      builtFromReplay = true;
+      dataMode = 'REPLAY';
+    }
 
     const bars = barsStmt.all(item.symbol) as Bar[];
     const checkpointPrice = snapshot[item.symbol]?.price;
@@ -159,7 +172,7 @@ export function buildDigest(opts: {
       // Card score is its best event, not the sum — otherwise five weak signals
       // would outrank one genuinely important one.
       score: scored[0]!.score,
-      freshness: freshnessOf(q.asOf, now, q.source),
+      freshness: freshnessOf(q.asOf, now, q.source, dataMode),
       asOf: q.asOf,
     });
   }
@@ -176,8 +189,14 @@ export function buildDigest(opts: {
 
   return {
     watchlistId: opts.watchlistId,
+    dataMode,
+    dataSessionDate: opts.dataSessionDate ?? null,
     since: cp?.takenAt ?? null,
-    sinceLabel: sinceLabel(cp?.takenAt ?? null, now),
+    sinceLabel: cp && dataMode === 'RECORDED'
+      ? 'at the previous close in this demo scenario'
+      : cp && dataMode === 'REPLAY'
+        ? 'at the previous close in this replay scenario'
+        : sinceLabel(cp?.takenAt ?? null, now),
     generatedAt: now,
     cards: top,
     quietCount: quietSymbols.length + overflow.length,

@@ -71,7 +71,16 @@ async function main(): Promise<void> {
   scheduler.onQuote((q) => {
     hub.broadcast({ type: 'quote', symbol: q.symbol, price: q.price, asOf: q.asOf, source: q.source });
   });
-  if (process.env.RADAR_NO_INGEST !== '1' && marketPhase() === 'OPEN') scheduler.start();
+  // Reconcile continuously instead of checking only once at boot. A process that starts
+  // before 09:15 must begin ingesting when the market opens, and stop after the close.
+  let ingestionRunning = false;
+  const reconcileIngestion = () => {
+    const shouldRun = process.env.RADAR_NO_INGEST !== '1' && marketPhase() === 'OPEN';
+    if (shouldRun && !ingestionRunning) { scheduler.start(); ingestionRunning = true; }
+    if (!shouldRun && ingestionRunning) { scheduler.stop(); ingestionRunning = false; }
+  };
+  reconcileIngestion();
+  const ingestionSupervisor = setInterval(reconcileIngestion, 30_000);
 
   // Replayed ticks ride the same SSE channel as live ones — the browser cannot tell
   // them apart, which is the point: the demo exercises the real path.
@@ -86,6 +95,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     clearInterval(heartbeat);
+    clearInterval(ingestionSupervisor);
     scheduler.stop();
     await app.close();
     process.exit(0);

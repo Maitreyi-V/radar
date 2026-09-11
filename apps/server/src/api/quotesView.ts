@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { freshnessOf } from '../digest/build.js';
-import type { Freshness } from '../digest/types.js';
+import type { DataMode, Freshness } from '../digest/types.js';
 
 export interface QuoteView {
   symbol: string; name: string; price: number; volume: number | null;
@@ -94,7 +94,11 @@ const SPARK_SQL = `
   ORDER BY rn ASC
 `;
 
-export function watchlistQuotes(watchlistId: string, now = Date.now()): QuoteView[] {
+export function watchlistQuotes(
+  watchlistId: string,
+  now = Date.now(),
+  dataMode: DataMode = 'CURRENT',
+): QuoteView[] {
   const rows = db.prepare(LATEST_SQL).all({ wid: watchlistId }) as any[];
   const spark = db.prepare(SPARK_SQL);
 
@@ -105,7 +109,7 @@ export function watchlistQuotes(watchlistId: string, now = Date.now()): QuoteVie
       ...r,
       changePct: base && base > 0 ? round2(((r.price - base) / base) * 100) : null,
       refChangePct: r.refPrice && r.refPrice > 0 ? round2(((r.price - r.refPrice) / r.refPrice) * 100) : null,
-      freshness: freshnessOf(r.asOf, now, r.source),
+      freshness: freshnessOf(r.asOf, now, r.source, dataMode),
       ageMs: Math.max(0, now - r.asOf),
       sparkline: points,
     } as QuoteView;

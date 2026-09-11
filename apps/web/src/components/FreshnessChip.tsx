@@ -13,6 +13,7 @@ const STYLES: Record<Freshness, { label: string; cls: string; dot: string }> = {
   DELAYED:       { label: 'DELAYED',       cls: 'bg-amber-500/10 text-amber-400',   dot: 'bg-amber-400' },
   STALE:         { label: 'STALE',         cls: 'bg-down/10 text-down',             dot: 'bg-down' },
   MARKET_CLOSED: { label: 'MARKET CLOSED', cls: 'bg-slate-500/10 text-slate-400',   dot: 'bg-slate-500' },
+  RECORDED:      { label: 'RECORDED',      cls: 'bg-violet-500/10 text-violet-300', dot: 'bg-violet-400' },
   // Replayed ticks are genuinely fresh, so an age check alone would call them LIVE.
   // They are labelled distinctly because presenting a recording as live market data
   // is precisely the kind of quiet lie this product refuses to tell.
@@ -27,7 +28,7 @@ export function FreshnessChip({ freshness, ageMs, showAge = true }: {
     <span className={`chip ${s.cls}`} title={ageMs !== undefined ? `Data received ${ago(ageMs)}` : undefined}>
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${freshness === 'LIVE' ? 'animate-pulse' : ''}`} />
       {s.label}
-      {showAge && ageMs !== undefined && freshness !== 'MARKET_CLOSED' && freshness !== 'REPLAY' && (
+      {showAge && ageMs !== undefined && !['MARKET_CLOSED', 'RECORDED', 'REPLAY'].includes(freshness) && (
         <span className="opacity-60">· {ago(ageMs)}</span>
       )}
     </span>

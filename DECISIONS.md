@@ -21,9 +21,11 @@ for 10 users is a negative signal, not a positive one.
 **Rejected:** requiring Postgres/Docker to run the project.
 **Why:** a judge must reach the hero moment in under 60 seconds. `npm install && npm run dev`
 with zero external services is worth more than theoretical concurrency headroom for a
-single-node app. The schema is deliberately written Postgres-portable — epoch-millis
-INTEGER timestamps, TEXT for JSON (JSONB in PG), no SQLite-only types — so the migration is
-a driver swap, not a rewrite. WAL mode gives us concurrent readers while the scheduler writes.
+single-node app. The schema deliberately avoids SQLite-only column types — epoch-millis
+INTEGER timestamps and TEXT for JSON — and the storage boundary is isolated. Moving to
+Postgres would still require an async repository adapter and a data migration; it is a
+contained production step, not a dishonest one-line driver swap. WAL mode gives us concurrent
+readers while the scheduler writes.
 
 ---
 
@@ -598,3 +600,21 @@ channel, trust it. Polling "just to be safe" is not belt-and-braces, it is a sec
 truth racing the first.
 **Also:** flashes now require a move above 0.05%, so dozens of simultaneous ticks stop
 shimmering. A flash that fires on everything highlights nothing.
+
+---
+
+### D45 — 2026-09-12 · A recorded scenario must own its clock
+**Chose:** give every response an explicit data context: `CURRENT`, `RECORDED`, or `REPLAY`.
+The bundled demo is scored at the final timestamp in its recorded session and visibly labelled
+`RECORDED`; replay ticks are labelled `REPLAY` end to end.
+**Rejected:** comparing a frozen 4 Sep recording with `Date.now()` and hoping trading-time decay
+would keep it visible forever.
+**Why:** a week after submission the deployed hero screen showed zero surfaced stocks. Nothing
+about the recorded prices or detector thresholds had changed; only the wall clock had moved.
+The ranking engine correctly decayed old events, but the demo had mixed two different worlds:
+a historical scenario and the present-day clock. Making the clock part of the data context
+restores deterministic cards without weakening production recency rules.
+**Also fixed:** resetting the shared demo now stops replay first, and the scheduler reconciles
+market-open state continuously rather than deciding only once at process startup.
+**Locked in by tests:** recorded mode returns stable cards on a later wall-clock date and marks
+every card `RECORDED`; replay mode has its own scenario label.

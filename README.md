@@ -12,9 +12,9 @@ enough to tell you when nothing happened.
 demo@radar.dev  ·  radar123
 ```
 
-*Free instance — the first load may take ~50s while it wakes, then it is instant. Nothing to
-install; the recorded market session ships with it, so the product is fully live even with the
-exchange closed.*
+*Free instance — the first load may take about a minute while it wakes. Nothing to install;
+the recorded market session ships with it, so the complete product remains demonstrable when
+the exchange is closed. Recorded prices are labelled `RECORDED`, never presented as live.*
 
 Built for CODE 2026 by Groww · Fri 4 Sep – Mon 7 Sep 2026
 
@@ -38,12 +38,12 @@ Then open **http://localhost:5173** and sign in with the seeded demo account:
 demo@radar.dev  /  radar123
 ```
 
-No Docker, no database server, no API keys. The repo ships with **a real recorded NSE trading
-session** (Friday 4 Sep 2026, 09:15–15:33 IST), so the product is fully demonstrable even
+No Docker, no database server, no API keys. The repo ships with **a real recorded Indian-equity
+market session** (Friday 4 Sep 2026, 09:15–15:33 IST), so the product is fully demonstrable even
 though the market is closed all weekend. See [Why the market being closed is a feature](#4-why-the-market-being-closed-is-a-feature).
 
 ```bash
-npm test            # 114 tests
+npm test            # 122 tests
 npm run explain     # the volatility table behind the thesis
 npm run seed        # reset the demo account's checkpoint to yesterday's close
 ```
@@ -271,6 +271,7 @@ staleness story.
 | `DELAYED · 4m ago` | market open, data older than 60s |
 | `STALE` | older than 15 minutes |
 | `MARKET CLOSED` | exchange shut — showing the last close |
+| `RECORDED` | bundled historical data powering the stable demo scenario |
 | `REPLAY` | **a replayed tick, not live market data** |
 
 ![The live watchlist](docs/live.png)
@@ -294,6 +295,7 @@ Honesty about provenance has to survive your own features.
 | Out-of-order tick delivery | older tick dropped, UI never flaps backwards | monotonic `as_of` guard |
 | **Two providers disagree** | fresher wins; if simultaneous and within 0.5%, hold (spread, not news); if simultaneous and further apart, **hold the last confirmed price, flag `unconfirmed`, re-poll** | `conflict.ts`, surfaced in the digest |
 | Replay data outlives its process | stranded rows cleared at boot; replay never writes to event history | replay is read-only w.r.t. real state |
+| Recorded demo gets older every day | evaluate it at the recording's final timestamp, not today's wall clock | explicit `RECORDED` data context |
 | Checkpoint races a quote write | snapshot is internally consistent | single transaction |
 | Server crashes mid-digest | nothing corrupts — recompute | digests are pure functions of stored state |
 | Weekend / clock skew | "since Friday's close", not "0% in 65 hours" | market-calendar-aware diffing |
@@ -348,16 +350,21 @@ pub/sub bus. These are seams, not implementations, and saying so is the honest a
   auditable arithmetic; an LLM score would be the black box this product argues against.
 - **Native mobile apps** — responsive web is enough.
 - **Microservices, Kafka, Kubernetes** — rejected explicitly. No Kubernetes for 10 users.
-- **Postgres** — the schema is written Postgres-portable (epoch-millis integers, TEXT for JSON,
-  no SQLite-only types) so it is a driver swap. SQLite ships because a judge reaching the hero
-  moment in 60 seconds is worth more than concurrency headroom a single node will not use.
+- **Postgres** — SQLite ships because a judge can run the complete single-node demo with no
+  external service. The schema intentionally avoids SQLite-only column types, but a production
+  migration would still require an async Postgres repository adapter and data migration; it is
+  a planned boundary, not an imaginary one-line driver swap.
+
+The hosted free Render service has an ephemeral filesystem, so writes can reset after a restart
+or redeploy. That is acceptable for the shared resettable demo, not for real user accounts. A
+production launch would use managed Postgres (or a persistent disk for a single-node beta).
 
 ---
 
 ## 9. Tests
 
 ```
-114 tests · 8 files
+122 tests · 8 files
 ```
 
 The judgment core is tested deeply, not everything shallowly.

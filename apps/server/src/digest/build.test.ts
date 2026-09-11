@@ -76,6 +76,10 @@ describe('freshnessOf', () => {
     const sunday = Date.UTC(2026, 8, 6, 6, 0);
     expect(freshnessOf(sunday - 1000, sunday)).toBe('MARKET_CLOSED');
   });
+
+  it('labels intentionally frozen demo data as RECORDED', () => {
+    expect(freshnessOf(NOW - 10_000, NOW, 'bse', 'RECORDED')).toBe('RECORDED');
+  });
 });
 
 describe('buildDigest', () => {
@@ -104,6 +108,25 @@ describe('buildDigest', () => {
     expect(d.cards[0]!.headline).toMatch(/its usual daily move/);
     expect(d.cards[0]!.headline).toMatch(/6%/);
     expect(d.quietSymbols).toContain('CALM.NS');   // the quiet one is still accounted for
+  });
+
+  it('keeps a recorded demo deterministic and labels its time context honestly', () => {
+    const d = buildDigest({
+      userId: USER, watchlistId: WL, now: NOW,
+      dataMode: 'RECORDED', dataSessionDate: '2026-09-04',
+    });
+    expect(d.dataMode).toBe('RECORDED');
+    expect(d.dataSessionDate).toBe('2026-09-04');
+    expect(d.sinceLabel).toBe('at the previous close in this demo scenario');
+    expect(d.cards.every((c) => c.freshness === 'RECORDED')).toBe(true);
+  });
+
+  it('uses scenario language while replaying instead of wall-clock age', () => {
+    const d = buildDigest({
+      userId: USER, watchlistId: WL, now: NOW,
+      dataMode: 'REPLAY', dataSessionDate: '2026-09-04',
+    });
+    expect(d.sinceLabel).toBe('at the previous close in this replay scenario');
   });
 
   it('respects the attention budget and buckets the rest', () => {

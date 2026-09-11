@@ -31,17 +31,39 @@ function closeInstant(iso: string): number {
 
 export interface ResetResult { watchlistId: string; symbols: number; anchoredTo: string }
 
+export interface RecordedDemoContext { sessionDate: string; now: number }
+
+/**
+ * A stable clock for the recorded demo.
+ *
+ * Scoring a 4 Sep recording against today's wall clock makes the exact same demo fade
+ * away a few trading sessions later. The recording is a closed world, so its honest
+ * evaluation time is the final timestamp in that recording, not Date.now().
+ */
+export function recordedDemoContext(): RecordedDemoContext {
+  const row = db.prepare(`
+    WITH recorded AS (
+      SELECT MAX(session_date) AS sessionDate
+      FROM quotes
+      WHERE source = 'bse-intraday' AND session_date IS NOT NULL
+    )
+    SELECT recorded.sessionDate, MAX(quotes.as_of) AS now
+    FROM recorded
+    JOIN quotes ON quotes.session_date = recorded.sessionDate
+    WHERE quotes.source <> 'replay'
+  `).get() as { sessionDate: string | null; now: number | null };
+  if (!row.sessionDate || row.now === null) throw new Error('no recorded session available');
+  return { sessionDate: row.sessionDate, now: row.now };
+}
+
 export function resetDemo(userId: string): ResetResult {
   // Anchor to the session BEFORE the most recent one we hold prices for, so the demo is
   // identical whichever day it is opened (see DECISIONS D41).
-  const recorded = db.prepare(
-    `SELECT MAX(session_date) AS d FROM quotes WHERE source = 'bse-intraday'`,
-  ).get() as { d: string | null };
-  if (!recorded.d) throw new Error('no recorded session available');
+  const recorded = recordedDemoContext();
 
   const prev = db.prepare(
     `SELECT DISTINCT bar_date FROM daily_bars WHERE bar_date < ? ORDER BY bar_date DESC LIMIT 1`,
-  ).get(recorded.d) as { bar_date: string } | undefined;
+  ).get(recorded.sessionDate) as { bar_date: string } | undefined;
   if (!prev) throw new Error('no daily history before the recorded session');
 
   const takenAt = closeInstant(prev.bar_date);

@@ -12,7 +12,7 @@ const SPEEDS = [1, 30, 60, 120, 300, 600];
  * ingestion -> SSE -> digest path as live ones, so what you watch reshape is the real
  * engine, not a canned animation.
  */
-export function ReplayBar({ onTick }: { onTick: () => void }) {
+export function ReplayBar({ onTick, onReset }: { onTick: () => void; onReset: () => void }) {
   const [status, setStatus] = useState<ReplayStatus | null>(null);
   const [sessions, setSessions] = useState<ReplaySession[]>([]);
   const [busy, setBusy] = useState(false);
@@ -44,6 +44,13 @@ export function ReplayBar({ onTick }: { onTick: () => void }) {
     setBusy(true); setErr(null);
     try { setStatus((await fn()).status); onTick(); }
     catch (e: any) { setErr(e.message ?? 'Replay failed'); }
+    finally { setBusy(false); }
+  };
+
+  const reset = async () => {
+    setBusy(true); setErr(null);
+    try { setStatus((await api.replayReset()).status); onReset(); }
+    catch (e: any) { setErr(e.message ?? 'Replay reset failed'); }
     finally { setBusy(false); }
   };
 
@@ -91,7 +98,7 @@ export function ReplayBar({ onTick }: { onTick: () => void }) {
               className="btn-primary text-xs px-3 py-1.5">Resume</button>
           )}
           {(running || paused || status.state === 'finished' || status.emitted > 0) && (
-            <button disabled={busy} onClick={() => void act(api.replayReset)}
+            <button disabled={busy} onClick={() => void reset()}
               className="btn-ghost text-xs px-3 py-1.5" title="Delete replayed ticks and restore real data">
               Reset
             </button>
