@@ -17,6 +17,7 @@ process.env.RADAR_DB = path.join(TMP, 'test.db');
 let db: typeof import('../db/index.js')['db'];
 let buildDigest: typeof import('./build.js')['buildDigest'];
 let freshnessOf: typeof import('./build.js')['freshnessOf'];
+let writeCheckpoint: typeof import('../api/watchlists.js')['writeCheckpoint'];
 
 const NOW = Date.UTC(2026, 8, 4, 6, 0);        // 2026-09-04 11:30 IST — market OPEN
 const CHECKPOINT = NOW - 18 * 3600_000;
@@ -45,6 +46,7 @@ function seedQuote(symbol: string, price: number, opts: { volume?: number; prevC
 beforeAll(async () => {
   ({ db } = await import('../db/index.js'));
   ({ buildDigest, freshnessOf } = await import('./build.js'));
+  ({ writeCheckpoint } = await import('../api/watchlists.js'));
 
   db.prepare(`INSERT INTO users (id,email,pw_hash,created_at) VALUES (?,?,?,?)`).run(USER, 'a@b.c', 'x', NOW);
   db.prepare(`INSERT INTO watchlists (id,user_id,name,version,created_at) VALUES (?,?,?,1,?)`).run(WL, USER, 'W', NOW);
@@ -179,5 +181,40 @@ describe('buildDigest', () => {
     const d = buildDigest({ userId: USER, watchlistId: WL, now: NOW });
     expect(d.since).toBeNull();
     expect(d.sinceLabel).toBe('your first visit');
+  });
+
+  it('Mark caught up acknowledges persistent events until their identity changes', () => {
+    const wl = 'ack-wl';
+    const symbol = 'ACK.NS';
+    db.prepare(`INSERT INTO watchlists (id,user_id,name,version,created_at) VALUES (?,?,?,1,?)`)
+      .run(wl, USER, 'Acknowledgement', NOW);
+    db.prepare(
+      `INSERT INTO watchlist_items (watchlist_id,symbol,added_at,ref_price) VALUES (?,?,?,?)`,
+    ).run(wl, symbol, CHECKPOINT, 80);
+    seedBars(symbol, 0.02); // high enough volatility that ref-price is the only event
+    seedQuote(symbol, 100, { prevClose: 100, asOf: Date.now() - 30_000 }); // +25% since added
+    db.prepare(
+      `INSERT INTO checkpoints (id,user_id,watchlist_id,taken_at,snapshot) VALUES (?,?,?,?,?)`,
+    ).run('ack-before', USER, wl, CHECKPOINT, JSON.stringify({ [symbol]: { price: 100 } }));
+
+    const before = buildDigest({ userId: USER, watchlistId: wl, now: Date.now(), sensitivity: 0.8 });
+    expect(before.cards[0]?.events.some((e) => e.type === 'REF_DRAWDOWN')).toBe(true);
+
+    writeCheckpoint(USER, wl);
+    const stored = db.prepare(
+      `SELECT snapshot FROM checkpoints WHERE watchlist_id = ? ORDER BY taken_at DESC LIMIT 1`,
+    ).get(wl) as { snapshot: string };
+    const acknowledged = JSON.parse(stored.snapshot)[symbol].acknowledgedEventKeys as string[];
+    expect(acknowledged).toContain(`${symbol}:REF_DRAWDOWN:20`);
+
+    const after = buildDigest({ userId: USER, watchlistId: wl, now: Date.now(), sensitivity: 0.8 });
+    expect(after.cards).toEqual([]);
+    expect(after.isQuiet).toBe(true);
+
+    // Crossing a new 10% reference bucket is new information and may surface again.
+    seedQuote(symbol, 120, { prevClose: 100, asOf: Date.now() + 60_000 });
+    const changed = buildDigest({ userId: USER, watchlistId: wl, now: Date.now() + 120_000, sensitivity: 0.8 });
+    expect(changed.cards[0]?.symbol).toBe(symbol);
+    expect(changed.cards[0]?.events.some((e) => e.dedupKey === `${symbol}:REF_DRAWDOWN:50`)).toBe(true);
   });
 });

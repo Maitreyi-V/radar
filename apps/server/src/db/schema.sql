@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS checkpoints (
   user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
   taken_at     INTEGER NOT NULL,
-  snapshot     TEXT NOT NULL     -- JSON {symbol: {price, day_high, day_low, volume, as_of}}
+  -- JSON {symbol: {price, dayHigh, dayLow, volume, asOf, acknowledgedEventKeys[]}}
+  snapshot     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_checkpoints_lookup ON checkpoints(user_id, watchlist_id, taken_at DESC);
 

@@ -90,7 +90,9 @@ export function buildDigest(opts: {
     | { takenAt: number; snapshot: string }
     | undefined;
 
-  const snapshot: Record<string, { price: number }> = cp ? safeParse(cp.snapshot) : {};
+  const snapshot: Record<string, { price: number; acknowledgedEventKeys?: string[] }> = cp
+    ? safeParse(cp.snapshot)
+    : {};
 
   // Novelty damping needs the symbols surfaced in PRIOR digests. Bounded by this
   // checkpoint so the current window's own events cannot damp themselves — otherwise
@@ -135,7 +137,13 @@ export function buildDigest(opts: {
       sessionDate: sessionDate(q.asOf),
     };
 
-    const scored = rank(detectAll(ctx), { now, recentDigestSymbols: history, threshold: sensitivity });
+    // A checkpoint is an acknowledgement boundary, not just a price baseline.
+    // Suppress conditions that were already active when the user marked themselves
+    // caught up. A changed event gets a changed key (4-day streak -> 5-day streak,
+    // +10% reference bucket -> +20%) and can surface again.
+    const acknowledged = new Set(snapshot[item.symbol]?.acknowledgedEventKeys ?? []);
+    const newlyMeaningful = detectAll(ctx).filter((e) => !acknowledged.has(e.dedupKey));
+    const scored = rank(newlyMeaningful, { now, recentDigestSymbols: history, threshold: sensitivity });
 
     if (scored.length === 0) {
       quietSymbols.push(item.symbol);

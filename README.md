@@ -43,7 +43,7 @@ market session** (Friday 4 Sep 2026, 09:15–15:33 IST), so the product is fully
 though the market is closed all weekend. See [Why the market being closed is a feature](#4-why-the-market-being-closed-is-a-feature).
 
 ```bash
-npm test            # 122 tests
+npm test            # 123 tests
 npm run explain     # the volatility table behind the thesis
 npm run seed        # reset the demo account's checkpoint to yesterday's close
 ```
@@ -364,7 +364,7 @@ production launch would use managed Postgres (or a persistent disk for a single-
 ## 9. Tests
 
 ```
-122 tests · 8 files
+123 tests · 8 files
 ```
 
 The judgment core is tested deeply, not everything shallowly.

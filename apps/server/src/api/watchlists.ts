@@ -1,6 +1,10 @@
 import { db, tx } from '../db/index.js';
 import { newId } from './auth.js';
 import { latestQuote } from '../ingestion/store.js';
+import { sessionDate } from '../ingestion/marketCalendar.js';
+import { detectAll } from '../significance/detectors.js';
+import type { Bar } from '../significance/stats.js';
+import type { SymbolContext } from '../significance/types.js';
 
 /** Thrown when a write carries a stale `version` — surfaced to the client as 409. */
 export class ConflictError extends Error {
@@ -11,6 +15,29 @@ export class ConflictError extends Error {
 }
 
 export interface Watchlist { id: string; name: string; version: number; symbols: string[] }
+
+interface CheckpointSnapshotEntry {
+  price: number;
+  dayHigh: number | null;
+  dayLow: number | null;
+  volume: number | null;
+  asOf: number;
+  /** Event identities already true when the user said "I've seen this". */
+  acknowledgedEventKeys: string[];
+}
+
+const checkpointItems = db.prepare(
+  `SELECT symbol, ref_price AS refPrice FROM watchlist_items
+   WHERE watchlist_id = ? ORDER BY added_at ASC`,
+);
+const checkpointBars = db.prepare(
+  `SELECT bar_date AS date, open, high, low, close, volume FROM daily_bars
+   WHERE symbol = ? ORDER BY bar_date ASC`,
+);
+const previousCheckpoint = db.prepare(
+  `SELECT taken_at AS takenAt, snapshot FROM checkpoints
+   WHERE user_id = ? AND watchlist_id = ? ORDER BY taken_at DESC LIMIT 1`,
+);
 
 export function listWatchlists(userId: string): Watchlist[] {
   const rows = db.prepare(
@@ -98,11 +125,45 @@ export function removeSymbol(
 export function writeCheckpoint(userId: string, watchlistId: string): { id: string; takenAt: number; symbols: number } {
   return tx(() => {
     requireOwned(userId, watchlistId);
-    const symbols = symbolsOf(watchlistId);
-    const snapshot: Record<string, { price: number; dayHigh: number | null; dayLow: number | null; volume: number | null; asOf: number }> = {};
-    for (const s of symbols) {
-      const q = latestQuote(s);
-      if (q) snapshot[s] = { price: q.price, dayHigh: q.dayHigh, dayLow: q.dayLow, volume: q.volume, asOf: q.asOf };
+    const items = checkpointItems.all(watchlistId) as Array<{ symbol: string; refPrice: number | null }>;
+    const previous = previousCheckpoint.get(userId, watchlistId) as
+      | { takenAt: number; snapshot: string }
+      | undefined;
+    const previousSnapshot = safeSnapshot(previous?.snapshot);
+    const snapshot: Record<string, CheckpointSnapshotEntry> = {};
+
+    for (const item of items) {
+      const q = latestQuote(item.symbol);
+      if (!q) continue;
+
+      // A checkpoint means more than "remember this price": it means "I have seen
+      // every condition that is true right now". Capturing the detector identities
+      // prevents persistent conditions (a 4-day streak, or +10% since added) from
+      // reappearing immediately after Mark caught up.
+      const ctx: SymbolContext = {
+        symbol: item.symbol,
+        bars: checkpointBars.all(item.symbol) as Bar[],
+        price: q.price,
+        volume: q.volume,
+        dayOpen: q.dayOpen,
+        prevClose: q.prevClose,
+        week52High: q.week52High,
+        week52Low: q.week52Low,
+        asOf: q.asOf,
+        checkpointPrice: previousSnapshot[item.symbol]?.price,
+        checkpointAt: previous?.takenAt,
+        refPrice: item.refPrice ?? undefined,
+        sessionDate: sessionDate(q.asOf),
+      };
+
+      snapshot[item.symbol] = {
+        price: q.price,
+        dayHigh: q.dayHigh,
+        dayLow: q.dayLow,
+        volume: q.volume,
+        asOf: q.asOf,
+        acknowledgedEventKeys: detectAll(ctx).map((e) => e.dedupKey),
+      };
     }
     const id = newId();
     const takenAt = Date.now();
@@ -154,4 +215,10 @@ function assertVersion(wl: { version: number }, expected: number | undefined, wa
 
 function bumpVersion(watchlistId: string): void {
   db.prepare(`UPDATE watchlists SET version = version + 1 WHERE id = ?`).run(watchlistId);
+}
+
+function safeSnapshot(value: string | undefined): Record<string, { price: number }> {
+  if (!value) return {};
+  try { return JSON.parse(value) as Record<string, { price: number }>; }
+  catch { return {}; }
 }

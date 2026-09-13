@@ -618,3 +618,22 @@ restores deterministic cards without weakening production recency rules.
 market-open state continuously rather than deciding only once at process startup.
 **Locked in by tests:** recorded mode returns stable cards on a later wall-clock date and marks
 every card `RECORDED`; replay mode has its own scenario label.
+
+---
+
+### D46 — 2026-09-13 · A checkpoint acknowledges conditions, not just prices
+**Chose:** store the deduplication keys of every currently active detector result inside
+each symbol's checkpoint snapshot. The next digest suppresses those keys; a changed identity
+(four-day streak becoming five, or a +10% reference bucket becoming +20%) may surface again.
+**Rejected:** relying on novelty damping to make acknowledged events gradually disappear.
+**Why:** caught through the UI after pressing **Mark caught up**. Price-relative events correctly
+fell to 0%, but TCS's four-day streak and IDEA/PAYTM's since-added conditions remained visible.
+Those detectors describe persistent conditions, so recalculating them answered "is this still
+true?" rather than the product's actual question, "is this new since I caught up?" A checkpoint
+is therefore an acknowledgement boundary as well as a numerical baseline.
+**Why capture on the server:** accepting event keys from the browser would trust stale or
+manipulated client state and race the latest quote. The server derives the snapshot and active
+conditions together inside the existing transaction.
+**Backward compatible:** older checkpoint JSON has no key list and continues to work.
+**Locked in by test:** a +25% since-added condition disappears immediately after checkpointing
+and reappears only after moving into a new +50% bucket.
