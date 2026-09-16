@@ -658,8 +658,8 @@ price finish?” The response now separates three facts: latest price, strongest
 and first observed crossing time. If a ₹100 stock touched ₹120 and returned to ₹101, Radar can
 honestly show ₹101 as current and say it “rose as much as 20%” earlier.
 
-**Scale boundary:** this is deliberately simple for the current bounded universe and retention
-window. On the shipped 16-stock recorded watchlist, the interval digest takes about 42 ms. At
+**Scale boundary:** this is deliberately simple for the current bounded universe and stored
+data volume. On the shipped 16-stock recorded watchlist, the interval digest takes about 42 ms. At
 whole-market or long-retention scale, preserve the same semantics using minute OHLC rollups or
 an ingestion-time market-event stream, then personalise and rank those events at read time.
 
