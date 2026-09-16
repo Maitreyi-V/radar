@@ -20,8 +20,8 @@ Built for CODE 2026 by Groww · Fri 4 Sep – Mon 7 Sep 2026
 
 ![The "Since you left" digest](docs/digest.png)
 
-*A ranked, capped set of cards, each explaining itself with its own numbers — and everything
-else honestly collapsed into one row.*
+*Four ranked cards, each explaining itself with its own numbers — and everything else honestly
+collapsed into one row.*
 
 ---
 
@@ -43,7 +43,7 @@ market session** (Friday 4 Sep 2026, 09:15–15:33 IST), so the product is fully
 though the market is closed all weekend. See [Why the market being closed is a feature](#4-why-the-market-being-closed-is-a-feature).
 
 ```bash
-npm test            # 124 tests
+npm test            # 123 tests
 npm run explain     # the volatility table behind the thesis
 npm run seed        # reset the demo account's checkpoint to yesterday's close
 ```
@@ -91,8 +91,8 @@ npm run explain
 It prints every watchlist symbol sorted by **raw percentage move** — and the surfaced/silent
 verdict deliberately does not follow that ordering. The mismatch is the whole argument.
 
-The same stock can still trigger a separate personal signal such as *"up 14.9% since you added
-it at ₹1442"*. That is a different question, honestly answered differently.
+PAYTM still appears in the digest — but as *"up 14.9% since you added it at ₹1442"*. A different
+question, honestly answered differently.
 
 ---
 
@@ -117,8 +117,7 @@ you can read in one sitting.
 score = base_weight × recency_decay(occurred_at) × novelty(symbol)
 ```
 
-- **Recency** halves after one complete trading session. Closed overnight hours, weekends and
-  exchange holidays do not make market information older when no trading occurred.
+- **Recency** halves every 24h. A 3σ move yesterday outranks a 3σ move last Tuesday.
 - **Novelty** multiplies by 0.7 per recent appearance, so one permanently jumpy stock cannot
   monopolise the digest and train you to ignore it.
 - **Top 5 only.** Everything else collapses into one row: *"Nothing unusual in 11 other stocks."*
@@ -127,23 +126,6 @@ score = base_weight × recency_decay(occurred_at) × novelty(symbol)
 A card ranks on its **best** event, not the sum of its events — summing lets five weak signals
 outrank one important one, and a big move usually drags volume and streak along with it, so
 summing double-counts a single story.
-
-### The digest examines the interval, not only the final price
-
-For each watchlist stock, Radar scans the stored quote rows between the user's checkpoint and
-the current request. This matters when a stock jumps unusually at 10:00 and returns near its
-starting price before the user opens Radar at 15:00: the movement still happened and can still
-deserve attention.
-
-Repeated above-threshold ticks are collapsed into one logical event. The event keeps:
-
-- the **first observed threshold crossing** as `occurredAt`, so recency has a real meaning;
-- the **strongest observed magnitude** and its time for the explanation; and
-- the **latest quote** as the card price, so an old peak is never presented as current.
-
-The wording makes the distinction visible: *"rose as much as 20% since you left"* describes
-the interval, while the price on the right is the latest known price. This is still read-time
-computation; Radar does not continuously build a private digest for every absent user.
 
 ### You can inspect the judgment, and tune it
 
@@ -233,13 +215,12 @@ The boundaries are drawn exactly where services would be cut later.
 |---|---|---|
 | `ingestion/` | fetch, normalise, tag every quote with `source` + `fetchedAt` + `asOf` | adapter interface quarantines each provider's quirks |
 | `significance/` | `(history, quote, checkpoint) → scored events`. Zero I/O | pure ⇒ trivially testable and replayable |
-| `digest/` | scan stored quotes since checkpoint, collapse events, rank, compress to top-N | computed **at read time**, never precomputed per user |
+| `digest/` | `diff(now, checkpoint)`, rank, compress to top-N | computed **at read time**, never precomputed per user |
 | `api/` | REST for CRUD, SSE for pushes | SSE over WebSockets — one-way data, free reconnection |
 | `replay/` | recorded/synthetic tick playback | **same code path as live**, so the demo proves the real system |
 
 **Core abstraction: the checkpoint.** A snapshot of exactly what you last saw, written when you
-sign out or hit "Mark caught up". Everything interesting is detected over the stored interval
-between that checkpoint and now.
+sign out or hit "Mark caught up". Everything interesting is `diff(now, checkpoint)`.
 
 ---
 
@@ -351,10 +332,7 @@ symbol; under a rate limit that is the difference between 40 seconds and never f
 measured, see DECISIONS D20.)
 
 **Digests are computed at read time.** Users are absent most of the time, and computing digests
-for absent users is work nobody reads. The current implementation scans the indexed quote slice
-for the requested watchlist, then caches the result for 30s to absorb refresh-spam. If the quote
-history grows beyond that simple design, the same interface can read minute OHLC rollups or a
-market-level event stream instead of every raw tick.
+for absent users is work nobody reads. Cache for 30s to absorb refresh-spam.
 
 **The engine itself is free.** Pure CPU over ~30 floats per symbol — microseconds. The bottleneck
 is I/O, which fetch dedup already minimises.
@@ -386,7 +364,7 @@ production launch would use managed Postgres (or a persistent disk for a single-
 ## 9. Tests
 
 ```
-124 tests · 8 files
+123 tests · 8 files
 ```
 
 The judgment core is tested deeply, not everything shallowly.

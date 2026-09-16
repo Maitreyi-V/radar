@@ -637,32 +637,3 @@ conditions together inside the existing transaction.
 **Backward compatible:** older checkpoint JSON has no key list and continues to work.
 **Locked in by test:** a +25% since-added condition disappears immediately after checkpointing
 and reappears only after moving into a new +50% bucket.
-
----
-
-### D47 — 2026-09-16 · “Since you left” is an interval, not a final-frame comparison
-**Chose:** when a digest is requested, scan the indexed quote rows between the latest checkpoint
-and the request time. Run the pure detectors on each observation, collapse repeated detections
-into one logical event, keep the first observed threshold crossing as `occurredAt`, and retain
-the strongest observed magnitude for the explanation. The card itself still displays the latest
-price. Replay scans only ticks that have actually been emitted, never the future of the tape.
-
-**Rejected:** comparing only the checkpoint price with the latest price. That design loses a
-real intraday event if a stock spikes at 10:00 and reverses before the user returns at 15:00. It
-also gives every detector result the timestamp of the latest quote, making recency nearly
-meaningless. Also rejected continuously computing per-user digests during ingestion: most users
-are absent, so most of that work would never be read.
-
-**Why:** the product promise is “what happened while I was away?”, not merely “where did the
-price finish?” The response now separates three facts: latest price, strongest interval move,
-and first observed crossing time. If a ₹100 stock touched ₹120 and returned to ₹101, Radar can
-honestly show ₹101 as current and say it “rose as much as 20%” earlier.
-
-**Scale boundary:** this is deliberately simple for the current bounded universe and retention
-window. On the shipped 16-stock recorded watchlist, the interval digest takes about 42 ms. At
-whole-market or long-retention scale, preserve the same semantics using minute OHLC rollups or
-an ingestion-time market-event stream, then personalise and rank those events at read time.
-
-**Locked in by test:** a checkpoint at ₹100, an observed spike to ₹120, and a latest quote of
-₹101 produces a card whose current price is ₹101, whose peak magnitude is 20%, and whose
-`occurredAt` is the spike's first observed threshold crossing.

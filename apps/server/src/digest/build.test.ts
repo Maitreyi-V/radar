@@ -112,38 +112,6 @@ describe('buildDigest', () => {
     expect(d.quietSymbols).toContain('CALM.NS');   // the quiet one is still accounted for
   });
 
-  it('preserves a meaningful intraday move that reversed before the user returned', () => {
-    const wl = 'transient-wl';
-    const symbol = 'TRANSIENT.NS';
-    const checkpointAt = Date.UTC(2026, 8, 4, 3, 45); // 09:15 IST
-    const spikeAt = Date.UTC(2026, 8, 4, 4, 30);      // 10:00 IST
-    const normalAt = Date.UTC(2026, 8, 4, 5, 59);     // 11:29 IST
-
-    db.prepare(`INSERT INTO watchlists (id,user_id,name,version,created_at) VALUES (?,?,?,1,?)`)
-      .run(wl, USER, 'Transient move', checkpointAt);
-    db.prepare(
-      `INSERT INTO watchlist_items (watchlist_id,symbol,added_at,ref_price) VALUES (?,?,?,?)`,
-    ).run(wl, symbol, checkpointAt, 100);
-    seedBars(symbol, 0.005); // about 1% daily sigma
-    db.prepare(
-      `INSERT INTO checkpoints (id,user_id,watchlist_id,taken_at,snapshot) VALUES (?,?,?,?,?)`,
-    ).run('transient-cp', USER, wl, checkpointAt, JSON.stringify({ [symbol]: { price: 100 } }));
-
-    seedQuote(symbol, 120, { prevClose: 100, asOf: spikeAt });
-    seedQuote(symbol, 101, { prevClose: 100, asOf: normalAt });
-
-    const d = buildDigest({ userId: USER, watchlistId: wl, now: NOW });
-    const move = d.cards[0]?.events.find((event) => event.type === 'VOLATILITY_MOVE');
-
-    expect(d.cards[0]?.symbol).toBe(symbol);
-    expect(d.cards[0]?.price).toBe(101);                // current state is honest
-    expect(d.cards[0]?.changePct).toBe(1);
-    expect(move?.occurredAt).toBe(spikeAt);             // recency uses the real crossing
-    expect(move?.detail.peakAt).toBe(spikeAt);
-    expect(move?.detail.changePct).toBe(20);            // the transient peak is retained
-    expect(move?.recency).toBeLessThan(1);
-  });
-
   it('keeps a recorded demo deterministic and labels its time context honestly', () => {
     const d = buildDigest({
       userId: USER, watchlistId: WL, now: NOW,

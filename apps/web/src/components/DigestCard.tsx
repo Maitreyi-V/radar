@@ -1,5 +1,5 @@
 import type { DigestCard as Card } from '../api';
-import { inr, istTime, pct, shortSymbol } from '../format';
+import { inr, pct, shortSymbol } from '../format';
 import { FreshnessChip } from './FreshnessChip';
 
 /** Human labels for event types — no unexplained badges anywhere in this UI. */
@@ -50,7 +50,6 @@ export function DigestCardView({ card, rank, onOpen }: {
           <span key={e.dedupKey} className="chip bg-ink-800 text-slate-400">
             {EVENT_LABEL[e.type] ?? e.type}
             <span className="opacity-50">· {e.score.toFixed(1)}</span>
-            <span className="opacity-50">· {istTime(e.occurredAt)}</span>
           </span>
         ))}
         <span className="ml-auto"><FreshnessChip freshness={card.freshness} showAge={false} /></span>
