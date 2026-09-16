@@ -11,6 +11,8 @@ export interface Quote {
   week52Low: number | null;
   /** Exchange timestamp: when this price was true in the market. */
   asOf: number;
+  /** Original exchange clock for replay statistical baselines. */
+  marketAsOf?: number;
   /** When we received it. asOf !== fetchedAt is the staleness story. */
   fetchedAt: number;
   source: string;

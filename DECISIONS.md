@@ -666,3 +666,39 @@ an ingestion-time market-event stream, then personalise and rank those events at
 **Locked in by test:** a checkpoint at ₹100, an observed spike to ₹120, and a latest quote of
 ₹101 produces a card whose current price is ₹101, whose peak magnitude is 20%, and whose
 `occurredAt` is the spike's first observed threshold crossing.
+
+
+---
+
+### D48 — 2026-09-17 · Materialise shared events during ingestion
+**Chose:** replace D47's read-time full-history detector pass with atomic quote ingestion,
+per-session summaries, and shared market events. Volume/52-week checks run on accepted ticks;
+opening gaps and completed-session streaks use session boundaries. The digest reads stored
+shared events, evaluates only personal price signals, and ranks on demand.
+
+**Correctness:** keep first detection separate from peak magnitude and current price. Personal
+first crossings and partial-session boundaries use indexed SQL queries restricted to individual
+sessions. Session baselines exclude that session and later daily bars. Replay projections are
+isolated and cleared with replay quotes; original tape timestamps select baselines. Shared-event
+strength versions preserve historical as-of reads. Novelty now records actual top-card exposure
+per watchlist/checkpoint rather than inferring user exposure from a global event log.
+
+**Long absences:** process session summaries rather than replaying every quote through six
+detectors. Skip personal sessions only when the maximum possible decayed score is below the
+requested threshold. No silent fixed history cutoff. Work still grows with session/event counts;
+exact crossing queries can examine ticks within individual sessions. Personal directional
+events retain per-session grouping. This is not constant-time processing.
+
+**Migration:** additive tables/column; initial startup backfill is atomic and records progress.
+Quote history is preserved. `npm run rebuild-signals --workspace=apps/server` reconstructs only
+derived events/summaries after detector or historical-bar corrections. The prototype's initial
+backfill is synchronous; production should batch this off the request-serving process.
+
+**Measured:** on a copy of the bundled 23,159 quotes, initial projection took ~1.3 s and a
+16-stock recorded digest had a ~3.2 ms median over 20 uncached local calls. This is a local
+measurement, not a claim about production concurrency.
+
+**Locked in by tests:** ingestion/read separation, spike-and-reversal retention, first crossing
+before peak, midday checkpoints, historical future exclusion, replay/reset isolation, original
+replay baselines, duplicate/stale/disputed quotes, transaction rollback, idempotent backfill,
+explicit rebuild, watchlist-specific novelty, personal baselines, and a 90-session absence.

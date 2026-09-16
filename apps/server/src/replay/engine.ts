@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { writeQuote } from '../ingestion/store.js';
 import type { Quote } from '../ingestion/types.js';
 import { sleep } from '../ingestion/rateLimiter.js';
+import { clearReplayProjections } from '../ingestion/projections.js';
 
 /**
  * Replay engine — plays a recorded trading session back through the SAME pipeline.
@@ -92,6 +93,8 @@ export class ReplayEngine {
     this.load(session);
     if (this.steps.length === 0) throw new Error(`no ticks recorded for ${session}`);
 
+    clearStrandedReplayRows();
+
     this.step = opts.fromStep ?? 0;
     this.emitted = 0;
     this.state = 'running';
@@ -116,6 +119,7 @@ export class ReplayEngine {
           // Stamped with wall-clock NOW so the tick reads as current to the freshness
           // contract and the digest; the original market time is preserved in `simulatedAt`.
           asOf: now, fetchedAt: now,
+          marketAsOf: r.as_of,
           source: REPLAY_SOURCE, isSynthetic: false,
         };
         writeQuote(q);
@@ -148,7 +152,7 @@ export class ReplayEngine {
   /** Remove every replayed row, restoring the view to real recorded data. */
   reset(): ReplayStatus {
     this.stop();
-    db.prepare(`DELETE FROM quotes WHERE source = ?`).run(REPLAY_SOURCE);
+    clearStrandedReplayRows();
     this.step = 0; this.emitted = 0; this.state = 'idle';
     return this.status();
   }
@@ -182,8 +186,10 @@ const clampSpeed = (s: number): number => Math.min(600, Math.max(1, Math.round(s
  * so we clear it at boot. Recorded and live rows are untouched.
  */
 export function clearStrandedReplayRows(): number {
-  const info = db.prepare(`DELETE FROM quotes WHERE source = ?`).run(REPLAY_SOURCE);
-  return info.changes;
+  return db.transaction(() => {
+    clearReplayProjections();
+    return db.prepare(`DELETE FROM quotes WHERE source = ?`).run(REPLAY_SOURCE).changes;
+  })();
 }
 
 export const replay = new ReplayEngine();

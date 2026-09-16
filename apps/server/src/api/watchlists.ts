@@ -3,7 +3,7 @@ import { newId } from './auth.js';
 import { latestQuote } from '../ingestion/store.js';
 import { sessionDate } from '../ingestion/marketCalendar.js';
 import { detectAll } from '../significance/detectors.js';
-import type { Bar } from '../significance/stats.js';
+import { barsBefore } from '../ingestion/projections.js';
 import type { SymbolContext } from '../significance/types.js';
 
 /** Thrown when a write carries a stale `version` — surfaced to the client as 409. */
@@ -29,10 +29,6 @@ interface CheckpointSnapshotEntry {
 const checkpointItems = db.prepare(
   `SELECT symbol, ref_price AS refPrice FROM watchlist_items
    WHERE watchlist_id = ? ORDER BY added_at ASC`,
-);
-const checkpointBars = db.prepare(
-  `SELECT bar_date AS date, open, high, low, close, volume FROM daily_bars
-   WHERE symbol = ? ORDER BY bar_date ASC`,
 );
 const previousCheckpoint = db.prepare(
   `SELECT taken_at AS takenAt, snapshot FROM checkpoints
@@ -142,7 +138,7 @@ export function writeCheckpoint(userId: string, watchlistId: string): { id: stri
       // reappearing immediately after Mark caught up.
       const ctx: SymbolContext = {
         symbol: item.symbol,
-        bars: checkpointBars.all(item.symbol) as Bar[],
+        bars: barsBefore(item.symbol, sessionDate(q.marketAsOf ?? q.asOf)),
         price: q.price,
         volume: q.volume,
         dayOpen: q.dayOpen,
@@ -153,7 +149,7 @@ export function writeCheckpoint(userId: string, watchlistId: string): { id: stri
         checkpointPrice: previousSnapshot[item.symbol]?.price,
         checkpointAt: previous?.takenAt,
         refPrice: item.refPrice ?? undefined,
-        sessionDate: sessionDate(q.asOf),
+        sessionDate: sessionDate(q.marketAsOf ?? q.asOf),
       };
 
       snapshot[item.symbol] = {

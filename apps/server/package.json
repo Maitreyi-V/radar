@@ -12,6 +12,7 @@
     "seed": "tsx src/cli/seed.ts",
     "bhavcopy": "tsx src/cli/bhavcopy.ts",
     "explain": "tsx src/cli/explain.ts",
+    "rebuild-signals": "tsx src/cli/rebuildSignals.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && cp src/db/schema.sql dist/db/schema.sql",

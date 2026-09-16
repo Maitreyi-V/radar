@@ -43,7 +43,7 @@ market session** (Friday 4 Sep 2026, 09:15–15:33 IST), so the product is fully
 though the market is closed all weekend. See [Why the market being closed is a feature](#4-why-the-market-being-closed-is-a-feature).
 
 ```bash
-npm test            # 124 tests
+npm test            # server tests
 npm run explain     # the volatility table behind the thesis
 npm run seed        # reset the demo account's checkpoint to yesterday's close
 ```
@@ -128,22 +128,48 @@ A card ranks on its **best** event, not the sum of its events — summing lets f
 outrank one important one, and a big move usually drags volume and streak along with it, so
 summing double-counts a single story.
 
-### The digest examines the interval, not only the final price
+### Shared detection happens when quotes arrive; personalisation happens on demand
 
-For each watchlist stock, Radar scans the stored quote rows between the user's checkpoint and
-the current request. This matters when a stock jumps unusually at 10:00 and returns near its
-starting price before the user opens Radar at 15:00: the movement still happened and can still
-deserve attention.
+Each accepted quote is saved in the same SQLite transaction as:
 
-Repeated above-threshold ticks are collapsed into one logical event. The event keeps:
+- a per-symbol/session summary containing observed open, high, low, latest price, their
+  timestamps, maximum cumulative volume, and a frozen pre-session statistical baseline;
+- shared events for volume spikes, 52-week breaches, opening gaps, and completed-session streaks.
 
-- the **first observed threshold crossing** as `occurredAt`, so recency has a real meaning;
-- the **strongest observed magnitude** and its time for the explanation; and
-- the **latest quote** as the card price, so an old peak is never presented as current.
+Repeated detections update one event's strongest observation while preserving its first
+crossing time. Events survive price reversals. Daily cumulative volume is **not summed** across
+polls. Summary extrema come from observed quote prices, not a provider's full-day high/low.
 
-The wording makes the distinction visible: *"rose as much as 20% since you left"* describes
-the interval, while the price on the right is the latest known price. This is still read-time
-computation; Radar does not continuously build a private digest for every absent user.
+The digest reads these shared events and session extrema, evaluates the two personal price
+signals against the user's checkpoint/added price, then applies acknowledgement, recency,
+novelty, and ranking. Novelty uses the top cards actually displayed to this watchlist, stored
+separately from market events; refreshes within one checkpoint window count as one visit.
+
+A high's timestamp is not necessarily the first crossing. Personal signals use an indexed
+query limited to the relevant session to recover the exact crossing. A midday checkpoint or
+historical end time also requires extrema queries within that partial session. These queries
+return individual rows, not the whole absence's quote history, and shared detectors never run
+on the digest path. Personal directional observations remain grouped per session.
+
+The response preserves three different facts: **first crossing**, **strongest magnitude**, and
+**latest price**. For a ₹100 → ₹120 → ₹101 path it can say “rose as much as 20%” while showing
+₹101 as current. There is no silent five-session cutoff: old personal sessions are skipped
+only when even their maximum possible score cannot reach the selected sensitivity threshold.
+A zero threshold disables that optimisation.
+
+Replay has separate event/summary records, built only from emitted ticks. Original market
+timestamps select historical baselines, and versioned shared-event strengths prevent earlier
+as-of requests from reading later peaks. Reset clears replay quotes and derived records together.
+
+Existing databases are upgraded and projected once at startup, outside digest requests.
+After changing historical bars or detector rules, rebuild the derived records explicitly:
+
+```bash
+npm run rebuild-signals --workspace=apps/server
+```
+
+Quote history and user checkpoints are preserved. This maintenance operation scans stored
+quotes once; run it outside active ingestion for a predictable maintenance window.
 
 ### You can inspect the judgment, and tune it
 
@@ -231,9 +257,9 @@ The boundaries are drawn exactly where services would be cut later.
 
 | Module | Responsibility | Key decision |
 |---|---|---|
-| `ingestion/` | fetch, normalise, tag every quote with `source` + `fetchedAt` + `asOf` | adapter interface quarantines each provider's quirks |
+| `ingestion/` | fetch and store quotes; maintain session summaries and shared market events | quote + projections commit atomically |
 | `significance/` | `(history, quote, checkpoint) → scored events`. Zero I/O | pure ⇒ trivially testable and replayable |
-| `digest/` | scan stored quotes since checkpoint, collapse events, rank, compress to top-N | computed **at read time**, never precomputed per user |
+| `digest/` | read shared events and summaries, personalise, rank, compress to top-N | no full-history raw-quote detector pass |
 | `api/` | REST for CRUD, SSE for pushes | SSE over WebSockets — one-way data, free reconnection |
 | `replay/` | recorded/synthetic tick playback | **same code path as live**, so the demo proves the real system |
 
@@ -271,8 +297,8 @@ scripted demo mode.
 *The market clock advances through the recorded session while the digest re-ranks live. Note
 the chip: `REPLAY`, never `LIVE`.*
 
-Replayed rows are written under `source='replay'` so the recorded tape stays pristine and Reset
-is a single `DELETE`. **They are labelled `REPLAY`, never `LIVE`** — see the failure table below.
+Replayed rows are written under `source='replay'` so the recorded tape stays pristine; Reset
+clears replay quotes and projections in one transaction. **They are labelled `REPLAY`, never `LIVE`** — see the failure table below.
 
 The database ships **in the repo**. Clone it on Sunday at midnight and the hero moment still works.
 
@@ -350,18 +376,22 @@ was already in the files we had downloaded. (A per-symbol history API costs one 
 symbol; under a rate limit that is the difference between 40 seconds and never finishing —
 measured, see DECISIONS D20.)
 
-**Digests are computed at read time.** Users are absent most of the time, and computing digests
-for absent users is work nobody reads. The current implementation scans the indexed quote slice
-for the requested watchlist, then caches the result for 30s to absorb refresh-spam. If the quote
-history grows beyond that simple design, the same interface can read minute OHLC rollups or a
-market-level event stream instead of every raw tick.
+**Shared detection scales with quotes, not users.** Volume, gaps, 52-week breaches, and
+streaks are materialised once. Digests still personalise and rank on demand, with a 30s cache.
+For W watched stocks and D sessions away, the summary work grows with W × D instead of
+W × D × ticks-per-session. Shared-event retrieval grows with the relevant event count.
+Exact personal timing and partial sessions still incur SQL work within individual sessions;
+this is not a constant-time or fully scan-free digest.
 
-**The engine itself is free.** Pure CPU over ~30 floats per symbol — microseconds. The bottleneck
-is I/O, which fetch dedup already minimises.
+**Measured locally, not a production capacity claim.** On a copy of the bundled 23,159-quote
+database, initial projection took about 1.3 seconds. The recorded 16-stock digest had a median
+of about 3.2 ms across 20 uncached calls. Those measurements describe this dataset and machine,
+not millions of users or simultaneous requests.
 
-**Named but not built:** in-process TTL cache → Redis at ~50k users (one swap behind the cache
-interface); ~10k idle SSE connections per node is fine, beyond that sticky load-balancing plus a
-pub/sub bus. These are seams, not implementations, and saying so is the honest answer.
+**Production improvements remain future work:** paginated/background projection rebuilds,
+interval extrema indexes or finer rollups for personal crossing lookups, event-version retention,
+background repair after history corrections, shared cache, managed storage, and a pub/sub layer
+for multiple API instances. The current implementation is an in-process SQLite prototype.
 
 ---
 
@@ -386,7 +416,7 @@ production launch would use managed Postgres (or a persistent disk for a single-
 ## 9. Tests
 
 ```
-124 tests · 8 files
+139 tests · 9 files
 ```
 
 The judgment core is tested deeply, not everything shallowly.
@@ -397,6 +427,7 @@ The judgment core is tested deeply, not everything shallowly.
 | `significance/detectors.test.ts` | all 6 detectors, and the thesis itself |
 | `significance/score.test.ts` | ranking, recency decay, attention budget |
 | `digest/build.test.ts` | **integration** — real SQLite, no mocks |
+| `ingestion/projections.test.ts` | atomic ingestion, exact crossing/peak times, historical reads, replay isolation, long absences, upgrade/rebuild |
 | `ingestion/resilience.test.ts` | circuit breaker, AIMD, timestamp parsing |
 | `ingestion/marketCalendar.test.ts` | weekend/holiday anchoring |
 | `ingestion/conflict.test.ts` | provider disagreement, the unconfirmed flag |

@@ -2,18 +2,9 @@ import { db } from '../db/index.js';
 import crypto from 'node:crypto';
 import type { ScoredEvent } from '../significance/score.js';
 
-/**
- * Event persistence.
- *
- * Detected events are written to `events`, where UNIQUE(dedup_key) makes a repeat
- * insert a no-op. That is idempotency BY CONSTRUCTION rather than by careful coding:
- * `TCS:BREACH_52W:2026-09-04` physically cannot be recorded twice, no matter how many
- * code paths compute it or how many requests race.
- *
- * Persisting them buys two things the in-memory version could not:
- *   - a per-symbol event timeline for the drill-down
- *   - the digest history that NOVELTY DAMPING needs. Without stored history, novelty()
- *     had nothing to look back at and silently always returned 1.0.
+/** Legacy surfaced-event log for the stock drill-down.
+ * Shared detection is stored separately in market_events during ingestion.
+ * Per-watchlist novelty is based on digest_exposures, never this global log.
  */
 const insert = db.prepare(`
   INSERT INTO events (id, symbol, type, magnitude, score, occurred_at, detail, dedup_key)
@@ -70,28 +61,21 @@ export function eventsForSymbol(symbol: string, since?: number, limit = 40): Sto
  * so cards silently drop out on reload — observed live, 4 cards becoming 3.
  */
 export function recentDigestSymbols(watchlistId: string, before?: number, buckets = 3): string[][] {
-  const cutoff = before ?? Number.MAX_SAFE_INTEGER;
-  const rows = db.prepare(`
-    SELECT DISTINCT e.symbol, e.occurred_at AS occurredAt
-    FROM events e
-    WHERE e.symbol IN (SELECT symbol FROM watchlist_items WHERE watchlist_id = ?)
-      AND e.occurred_at < ?
-    ORDER BY e.occurred_at DESC LIMIT 200
-  `).all(watchlistId, cutoff) as Array<{ symbol: string; occurredAt: number }>;
+  if (before === undefined) return [];
+  const rows = db.prepare(`SELECT symbols FROM digest_exposures
+    WHERE watchlist_id = ? AND shown_at < ? ORDER BY shown_at DESC LIMIT ?`)
+    .all(watchlistId, before, buckets) as Array<{ symbols: string }>;
+  return rows.map((row) => JSON.parse(row.symbols) as string[]);
+}
 
-  if (rows.length === 0) return [];
-
-  // Group into `buckets` equal time slices spanning the observed history.
-  const newest = rows[0]!.occurredAt;
-  const oldest = rows[rows.length - 1]!.occurredAt;
-  const span = Math.max(1, newest - oldest);
-  const out: string[][] = Array.from({ length: buckets }, () => []);
-
-  for (const r of rows) {
-    const idx = Math.min(buckets - 1, Math.floor(((newest - r.occurredAt) / span) * buckets));
-    if (!out[idx]!.includes(r.symbol)) out[idx]!.push(r.symbol);
-  }
-  return out;
+/** Refreshes in one checkpoint window count as a single visit. Only top cards count. */
+export function recordDigestExposure(watchlistId: string, checkpointId: string, at: number, symbols: string[]): void {
+  const prior = db.prepare(`SELECT symbols FROM digest_exposures WHERE watchlist_id = ? AND checkpoint_id = ?`)
+    .get(watchlistId, checkpointId) as { symbols: string } | undefined;
+  const seen = [...new Set([...(prior ? JSON.parse(prior.symbols) as string[] : []), ...symbols])];
+  db.prepare(`INSERT INTO digest_exposures (watchlist_id, checkpoint_id, shown_at, symbols) VALUES (?, ?, ?, ?)
+    ON CONFLICT(watchlist_id, checkpoint_id) DO UPDATE SET symbols = excluded.symbols`)
+    .run(watchlistId, checkpointId, at, JSON.stringify(seen));
 }
 
 function safeParse(s: string): Record<string, unknown> {

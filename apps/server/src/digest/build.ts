@@ -1,14 +1,16 @@
 import { db } from '../db/index.js';
 import type { Bar } from '../significance/stats.js';
-import type { DetectedEvent, SymbolContext } from '../significance/types.js';
-import { detectAll, short } from '../significance/detectors.js';
-import { rank, ATTENTION_THRESHOLD, type ScoredEvent } from '../significance/score.js';
+import type { SymbolContext } from '../significance/types.js';
+import { detectRefDrawdown, detectVolatilityMove, short } from '../significance/detectors.js';
+import { rank, ATTENTION_THRESHOLD } from '../significance/score.js';
 import { volatility } from '../significance/stats.js';
 import type { DataMode, Digest, DigestCard, Freshness } from './types.js';
 import { marketPhase, sessionDate, lastSessionClose } from '../ingestion/marketCalendar.js';
 import { STALENESS } from '../config.js';
-import { recordEvents, recentDigestSymbols } from './events.js';
+import { recordEvents, recordDigestExposure, recentDigestSymbols } from './events.js';
 import { unconfirmed } from '../ingestion/conflict.js';
+import { barsBefore, marketEvents } from '../ingestion/projections.js';
+import { personalEvents } from './personal.js';
 
 /**
  * Honest data-age label. We never render a price without saying how old it is —
@@ -34,37 +36,19 @@ export function freshnessOf(asOf: number, now: number, source?: string, dataMode
   return 'STALE';
 }
 
-const barsStmt = db.prepare(
-  `SELECT bar_date AS date, open, high, low, close, volume FROM daily_bars
-   WHERE symbol = ? ORDER BY bar_date ASC`,
-);
 const latestNonReplayStmt = db.prepare(
   `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
-          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, source
+          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, market_as_of AS marketAsOf, source
    FROM quotes
    WHERE symbol = ? AND source <> 'replay' AND as_of <= ?
    ORDER BY as_of DESC, id DESC LIMIT 1`,
 );
 const latestReplayStmt = db.prepare(
   `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
-          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, source
+          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, market_as_of AS marketAsOf, source
    FROM quotes
    WHERE symbol = ? AND source = 'replay' AND as_of <= ?
    ORDER BY as_of DESC, id DESC LIMIT 1`,
-);
-const intervalNonReplayStmt = db.prepare(
-  `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
-          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, source
-   FROM quotes
-   WHERE symbol = ? AND source <> 'replay' AND as_of > ? AND as_of <= ?
-   ORDER BY as_of ASC, id ASC`,
-);
-const intervalReplayStmt = db.prepare(
-  `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
-          week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, source
-   FROM quotes
-   WHERE symbol = ? AND source = 'replay' AND as_of > ? AND as_of <= ?
-   ORDER BY as_of ASC, id ASC`,
 );
 const itemsStmt = db.prepare(
   `SELECT wi.symbol, wi.ref_price AS refPrice, wi.added_at AS addedAt,
@@ -73,84 +57,14 @@ const itemsStmt = db.prepare(
    WHERE wi.watchlist_id = ? ORDER BY wi.added_at ASC`,
 );
 const checkpointStmt = db.prepare(
-  `SELECT taken_at AS takenAt, snapshot FROM checkpoints
+  `SELECT id, taken_at AS takenAt, snapshot FROM checkpoints
    WHERE watchlist_id = ? AND user_id = ? ORDER BY taken_at DESC LIMIT 1`,
 );
 
 interface ItemRow { symbol: string; refPrice: number | null; addedAt: number; name: string }
 interface QuoteRow {
   price: number; volume: number | null; dayOpen: number | null; prevClose: number | null;
-  week52High: number | null; week52Low: number | null; asOf: number; source: string;
-}
-
-/**
- * One condition can remain true across hundreds of ticks. Collapse those observations
- * into one logical event while preserving two different facts:
- *
- *   - occurredAt: the FIRST threshold crossing (what recency must use)
- *   - magnitude/detail: the strongest observation (what the explanation should report)
- *
- * A volatility move and a reference-price move are directional conditions. The other
- * detectors already produce stable per-session/per-milestone dedup keys.
- */
-function logicalEventKey(event: DetectedEvent): string {
-  if (event.type === 'VOLATILITY_MOVE' || event.type === 'REF_DRAWDOWN') {
-    return `${event.symbol}:${event.type}:${sessionDate(event.occurredAt)}:${Math.sign(event.magnitude)}`;
-  }
-  return event.dedupKey;
-}
-
-function collapseIntervalEvents(events: DetectedEvent[], latestAsOf: number): DetectedEvent[] {
-  const grouped = new Map<string, { firstAt: number; strongest: DetectedEvent }>();
-
-  for (const event of events) {
-    const key = logicalEventKey(event);
-    const current = grouped.get(key);
-    if (!current) {
-      grouped.set(key, { firstAt: event.occurredAt, strongest: event });
-      continue;
-    }
-
-    current.firstAt = Math.min(current.firstAt, event.occurredAt);
-    if (event.baseScore > current.strongest.baseScore ||
-        (event.baseScore === current.strongest.baseScore && Math.abs(event.magnitude) > Math.abs(current.strongest.magnitude))) {
-      current.strongest = event;
-    }
-  }
-
-  return [...grouped.values()].map(({ firstAt, strongest }) => {
-    const peakAt = strongest.occurredAt;
-    let explanation = strongest.explanation;
-
-    // If the strongest observation is no longer the latest state, say so plainly. The
-    // card's price remains the current price; this sentence describes what happened in
-    // the interval rather than pretending the peak is still current.
-    if (peakAt < latestAsOf && strongest.type === 'VOLATILITY_MOVE') {
-      const change = Number(strongest.detail.changePct);
-      const z = Number(strongest.detail.z);
-      const sigma = Number(strongest.detail.sigmaPct);
-      explanation =
-        `${short(strongest.symbol)} ${change >= 0 ? 'rose' : 'fell'} as much as ${Math.abs(round2(change))}% ` +
-        `since you left — ${Math.abs(round2(z))}× its usual daily move of about ±${round2(sigma)}%.`;
-    } else if (peakAt < latestAsOf && strongest.type === 'REF_DRAWDOWN') {
-      const change = Number(strongest.detail.changePct);
-      const refPrice = Number(strongest.detail.refPrice);
-      explanation =
-        `${short(strongest.symbol)} was ${change >= 0 ? 'up' : 'down'} as much as ${Math.abs(round2(change))}% ` +
-        `since you added it at ₹${round2(refPrice)}.`;
-    }
-
-    return {
-      ...strongest,
-      occurredAt: firstAt,
-      explanation,
-      detail: {
-        ...strongest.detail,
-        firstDetectedAt: firstAt,
-        peakAt,
-      },
-    };
-  });
+  week52High: number | null; week52Low: number | null; asOf: number; marketAsOf?: number; source: string;
 }
 
 function contextForQuote(
@@ -174,7 +88,7 @@ function contextForQuote(
     checkpointPrice,
     checkpointAt,
     refPrice,
-    sessionDate: sessionDate(quote.asOf),
+    sessionDate: sessionDate(quote.marketAsOf ?? quote.asOf),
   };
 }
 
@@ -183,7 +97,7 @@ function contextForQuote(
  *
  * Computed at READ time, on demand, never precomputed per user. Users are absent most
  * of the time, and computing digests for absent users is work nobody will ever read.
- * Everything here is a pure function of (quotes, daily_bars, checkpoint) — so a crash
+ * Shared events and summaries are maintained during ingestion; personalisation stays here — so a crash
  * mid-digest corrupts nothing; we simply recompute.
  */
 export function buildDigest(opts: {
@@ -205,7 +119,7 @@ export function buildDigest(opts: {
 
   const items = itemsStmt.all(opts.watchlistId) as ItemRow[];
   const cp = checkpointStmt.get(opts.watchlistId, opts.userId) as
-    | { takenAt: number; snapshot: string }
+    | { id: string; takenAt: number; snapshot: string }
     | undefined;
 
   const snapshot: Record<string, { price: number; acknowledgedEventKeys?: string[] }> = cp
@@ -249,7 +163,7 @@ export function buildDigest(opts: {
       dataMode = 'REPLAY';
     }
 
-    const bars = barsStmt.all(item.symbol) as Bar[];
+    const bars = barsBefore(item.symbol, sessionDate(q.marketAsOf ?? q.asOf));
     const ctx = contextForQuote(
       item.symbol, q, bars, checkpointPrice, cp?.takenAt, item.refPrice ?? undefined,
     );
@@ -259,27 +173,17 @@ export function buildDigest(opts: {
     // caught up. A changed event gets a changed key (4-day streak -> 5-day streak,
     // +10% reference bucket -> +20%) and can surface again.
     const acknowledged = new Set(snapshot[item.symbol]?.acknowledgedEventKeys ?? []);
-    let newlyMeaningful: DetectedEvent[];
-
-    if (cp) {
-      // "Since you left" means the whole interval, not merely its final frame. Scan the
-      // stored, indexed quote slice and retain the first threshold-crossing time plus
-      // the strongest magnitude. A move that spikes and later reverses must not vanish.
-      // Replay reads ONLY emitted replay rows, so the future of the tape cannot leak in.
-      const rows = (dataMode === 'REPLAY'
-        ? intervalReplayStmt.all(item.symbol, cp.takenAt, now)
-        : intervalNonReplayStmt.all(item.symbol, cp.takenAt, now)) as QuoteRow[];
-
-      const observed = rows.flatMap((row) => detectAll(contextForQuote(
-        item.symbol, row, bars, checkpointPrice, cp.takenAt, item.refPrice ?? undefined,
-      ))).filter((event) => !acknowledged.has(event.dedupKey));
-
-      newlyMeaningful = collapseIntervalEvents(observed, q.asOf);
-    } else {
-      // A first visit has no interval anchor. Show what is meaningful in the latest
-      // state, preserving the original first-visit behaviour.
-      newlyMeaningful = detectAll(ctx);
-    }
+    const stream = dataMode === 'REPLAY' ? 'replay' : 'market';
+    // First visits use the latest session's market events and latest personal state.
+    // Checkpoint visits preserve the full absence without rerunning shared detectors.
+    const after = cp ? Math.max(cp.takenAt, item.addedAt) : (q.asOf - 24 * 3600_000);
+    const shared = marketEvents(item.symbol, stream, after, now)
+      .filter((event) => !acknowledged.has(event.dedupKey));
+    const personal = cp
+      ? personalEvents({ symbol: item.symbol, stream, after, until: now, latestAsOf: q.asOf,
+          checkpointPrice, refPrice: item.refPrice ?? undefined, acknowledged, sensitivity })
+      : [detectVolatilityMove(ctx), detectRefDrawdown(ctx)].filter((event) => event !== null);
+    const newlyMeaningful = [...shared, ...personal];
     const scored = rank(newlyMeaningful, { now, recentDigestSymbols: history, threshold: sensitivity });
 
     if (scored.length === 0) {
@@ -325,10 +229,13 @@ export function buildDigest(opts: {
   // Persist what we surfaced. UNIQUE(dedup_key) makes this idempotent, so refreshing
   // the digest ten times records each event exactly once. Skipped entirely during
   // replay — see `builtFromReplay` above.
-  if (!builtFromReplay) recordEvents(cards.flatMap((c) => c.events));
 
   cards.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
   const top = cards.slice(0, limit);
+  if (!builtFromReplay && dataMode !== 'REPLAY') {
+    recordEvents(top.flatMap((c) => c.events));
+    recordDigestExposure(opts.watchlistId, cp?.id ?? 'first-visit', now, top.map((c) => c.symbol));
+  }
   // Cards that existed but lost the attention budget still count as "quiet" to the user.
   const overflow = cards.slice(limit).map((c) => c.symbol);
 

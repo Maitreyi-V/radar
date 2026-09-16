@@ -51,12 +51,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ---------- health ----------
   app.get('/api/health', async () => ({
     ok: true,
+    digestEngine: 'ingestion-v1',
     marketPhase: marketPhase(),
     sseClients: hub.size,
     quotes: (db.prepare(`SELECT COUNT(*) n FROM quotes`).get() as { n: number }).n,
     symbols: (db.prepare(`SELECT COUNT(*) n FROM symbols`).get() as { n: number }).n,
     dailyBars: (db.prepare(`SELECT COUNT(*) n FROM daily_bars`).get() as { n: number }).n,
     events: (db.prepare(`SELECT COUNT(*) n FROM events`).get() as { n: number }).n,
+    marketEvents: (db.prepare(`SELECT COUNT(*) n FROM market_events WHERE stream = 'market'`).get() as { n: number }).n,
+    sessionSummaries: (db.prepare(`SELECT COUNT(*) n FROM session_summaries WHERE stream = 'market'`).get() as { n: number }).n,
     unconfirmed: unconfirmed.all(),
   }));
 

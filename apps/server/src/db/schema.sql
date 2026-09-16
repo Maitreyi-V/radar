@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS quotes (
   week52_high  REAL,
   week52_low   REAL,
   as_of        INTEGER NOT NULL,   -- exchange timestamp reported by the provider
+  market_as_of INTEGER,            -- original market clock for emitted replay ticks
   fetched_at   INTEGER NOT NULL,   -- when WE received it
   source       TEXT NOT NULL,      -- yahoo | synthetic | replay | cache
   is_synthetic INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +89,60 @@ CREATE TABLE IF NOT EXISTS events (
   dedup_key   TEXT NOT NULL UNIQUE         -- 'TCS:BREACH_52W:2026-09-04' -> can never fire twice
 );
 CREATE INDEX IF NOT EXISTS idx_events_symbol_time ON events(symbol, occurred_at DESC);
+
+-- Shared ingestion projections. Replay has its own namespace and is deleted on reset.
+CREATE TABLE IF NOT EXISTS session_summaries (
+  stream TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  session_date TEXT NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  open_quote TEXT NOT NULL,
+  high_quote TEXT NOT NULL,
+  low_quote TEXT NOT NULL,
+  latest_quote TEXT NOT NULL,
+  max_volume INTEGER,
+  bars TEXT NOT NULL,
+  PRIMARY KEY (stream, symbol, session_date)
+);
+CREATE INDEX IF NOT EXISTS idx_summaries_interval ON session_summaries(stream, symbol, last_at);
+
+CREATE TABLE IF NOT EXISTS market_events (
+  stream TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  occurred_at INTEGER NOT NULL,
+  peak_at INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (stream, dedup_key)
+);
+CREATE INDEX IF NOT EXISTS idx_market_events_interval ON market_events(stream, symbol, occurred_at);
+
+-- Only strength improvements are versioned, so historical/as-of reads cannot see
+-- a later peak. Normal current reads use the single current market_events row.
+CREATE TABLE IF NOT EXISTS market_event_versions (
+  stream TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (stream, dedup_key, observed_at),
+  FOREIGN KEY (stream, dedup_key) REFERENCES market_events(stream, dedup_key) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS projection_progress (
+  name TEXT PRIMARY KEY,
+  quote_id INTEGER NOT NULL
+);
+
+-- User exposure is separate from market occurrence. One visit = one checkpoint window.
+CREATE TABLE IF NOT EXISTS digest_exposures (
+  watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+  checkpoint_id TEXT NOT NULL,
+  shown_at INTEGER NOT NULL,
+  symbols TEXT NOT NULL,
+  PRIMARY KEY (watchlist_id, checkpoint_id)
+);
+CREATE INDEX IF NOT EXISTS idx_exposures_visits ON digest_exposures(watchlist_id, shown_at DESC);
 
 CREATE TABLE IF NOT EXISTS symbols (
   symbol    TEXT PRIMARY KEY,

@@ -17,6 +17,7 @@ process.env.RADAR_DB = path.join(TMP, 'test.db');
 let db: typeof import('../db/index.js')['db'];
 let buildDigest: typeof import('./build.js')['buildDigest'];
 let freshnessOf: typeof import('./build.js')['freshnessOf'];
+let writeQuote: typeof import('../ingestion/store.js')['writeQuote'];
 let writeCheckpoint: typeof import('../api/watchlists.js')['writeCheckpoint'];
 
 const NOW = Date.UTC(2026, 8, 4, 6, 0);        // 2026-09-04 11:30 IST — market OPEN
@@ -35,16 +36,15 @@ function seedBars(symbol: string, pct: number, base = 100, volume = 1000): void 
 }
 
 function seedQuote(symbol: string, price: number, opts: { volume?: number; prevClose?: number; asOf?: number } = {}): void {
-  db.prepare(
-    `INSERT INTO quotes (symbol, price, volume, day_high, day_low, day_open, prev_close,
-       week52_high, week52_low, as_of, fetched_at, source, is_synthetic, session_date)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,'test',0,'2026-09-04')`,
-  ).run(symbol, price, opts.volume ?? 1000, price, price, opts.prevClose ?? 100,
-        opts.prevClose ?? 100, null, null, opts.asOf ?? NOW - 30_000, NOW);
+  writeQuote({ symbol, price, volume: opts.volume ?? 1000, dayHigh: price, dayLow: price,
+    dayOpen: opts.prevClose ?? 100, prevClose: opts.prevClose ?? 100,
+    week52High: null, week52Low: null, asOf: opts.asOf ?? NOW - 30_000,
+    fetchedAt: NOW, source: 'test', isSynthetic: false });
 }
 
 beforeAll(async () => {
   ({ db } = await import('../db/index.js'));
+  ({ writeQuote } = await import('../ingestion/store.js'));
   ({ buildDigest, freshnessOf } = await import('./build.js'));
   ({ writeCheckpoint } = await import('../api/watchlists.js'));
 
