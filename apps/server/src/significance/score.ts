@@ -4,7 +4,7 @@ import { tradingMsBetween, SESSION_MS } from '../ingestion/marketCalendar.js';
 /**
  * Ranking and the attention budget.
  *
- *   score = baseScore x recencyDecay(occurredAt) x novelty(symbol)
+ *   score = baseScore x recencyDecay(occurredAt) x novelty(symbol, eventType)
  *
  * The digest is not "all events sorted by size" — it is a fixed budget of the user's
  * attention, spent on the few things most worth knowing. Two multipliers shape it.
@@ -31,16 +31,19 @@ export function recencyDecay(occurredAt: number, now: number, halfLifeMs = HALF_
   return 0.5 ** (age / halfLifeMs);
 }
 
-/**
- * Novelty: damps repeat offenders.
- * A permanently volatile small-cap would otherwise fill every digest forever and train
- * the user to ignore it. Each recent appearance multiplies its score by 0.7.
+/** A new event type for the same stock starts with full novelty. Watchlist scope
+ * is enforced when loading exposure history; each prior visit counts at most once.
  */
 export const NOVELTY_FACTOR = 0.7;
 
-export function novelty(symbol: string, recentDigestSymbols: string[][]): number {
+export function noveltyKey(event: Pick<DetectedEvent, 'symbol' | 'type'>): string {
+  return `${event.symbol}:${event.type}`;
+}
+
+export function novelty(event: Pick<DetectedEvent, 'symbol' | 'type'>, recentDigestEventKeys: string[][]): number {
+  const key = noveltyKey(event);
   let appearances = 0;
-  for (const digest of recentDigestSymbols) if (digest.includes(symbol)) appearances++;
+  for (const digest of recentDigestEventKeys) if (digest.includes(key)) appearances++;
   return NOVELTY_FACTOR ** appearances;
 }
 
@@ -54,14 +57,14 @@ export interface ScoreOptions {
   now: number;
   /** Attention threshold override. Lower surfaces more. */
   threshold?: number;
-  /** Symbols surfaced in the user's last few digests, newest first. */
-  recentDigestSymbols?: string[][];
+  /** Stock + event-type keys displayed in this watchlist's prior visits. */
+  recentDigestEventKeys?: string[][];
   halfLifeMs?: number;
 }
 
 export function scoreEvent(e: DetectedEvent, opts: ScoreOptions): ScoredEvent {
   const recency = recencyDecay(e.occurredAt, opts.now, opts.halfLifeMs);
-  const nov = novelty(e.symbol, opts.recentDigestSymbols ?? []);
+  const nov = novelty(e, opts.recentDigestEventKeys ?? []);
   return { ...e, recency, noveltyFactor: nov, score: e.baseScore * recency * nov };
 }
 

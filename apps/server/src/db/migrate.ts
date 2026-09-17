@@ -12,6 +12,7 @@ import type DatabaseType from 'better-sqlite3';
  * dropped to apply a schema change.
  */
 const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+  { table: 'digest_exposures', column: 'event_keys', ddl: "ALTER TABLE digest_exposures ADD COLUMN event_keys TEXT NOT NULL DEFAULT '[]'" },
   { table: 'quotes', column: 'market_as_of', ddl: 'ALTER TABLE quotes ADD COLUMN market_as_of INTEGER' },
   { table: 'symbols', column: 'bse_code', ddl: 'ALTER TABLE symbols ADD COLUMN bse_code TEXT' },
   { table: 'symbols', column: 'mktcap', ddl: 'ALTER TABLE symbols ADD COLUMN mktcap REAL' },

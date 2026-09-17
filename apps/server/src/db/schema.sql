@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS digest_exposures (
   checkpoint_id TEXT NOT NULL,
   shown_at INTEGER NOT NULL,
   symbols TEXT NOT NULL,
+  event_keys TEXT NOT NULL DEFAULT '[]', -- stock + event type displayed in this visit
   PRIMARY KEY (watchlist_id, checkpoint_id)
 );
 CREATE INDEX IF NOT EXISTS idx_exposures_visits ON digest_exposures(watchlist_id, shown_at DESC);

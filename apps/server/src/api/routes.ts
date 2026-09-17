@@ -52,6 +52,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/health', async () => ({
     ok: true,
     digestEngine: 'ingestion-v1',
+    noveltyScope: 'watchlist-symbol-event-type',
     marketPhase: marketPhase(),
     sseClients: hub.size,
     quotes: (db.prepare(`SELECT COUNT(*) n FROM quotes`).get() as { n: number }).n,

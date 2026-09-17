@@ -702,3 +702,21 @@ measurement, not a claim about production concurrency.
 before peak, midday checkpoints, historical future exclusion, replay/reset isolation, original
 replay baselines, duplicate/stale/disputed quotes, transaction rollback, idempotent backfill,
 explicit rebuild, watchlist-specific novelty, personal baselines, and a 90-session absence.
+
+
+---
+
+### D49 — 2026-09-17 · Novelty belongs to a stock and event type within a watchlist
+**Correction:** D48 recorded stock-only exposure. That damped a new 52-week breach merely
+because the same stock previously had a volume spike, contrary to the intended product rule.
+Novelty now matches `(watchlist_id, symbol, event_type)`. Each matching appearance in the last
+three prior visits multiplies the event score by 0.7; unrelated event types retain full novelty.
+
+**Storage:** add `event_keys` to `digest_exposures`. Record the event types displayed on the top
+cards, including supporting events. Repeated observations and refreshes in a checkpoint window
+count once. Legacy symbol-only rows default to empty event-type history, rather than guessing.
+Replay still writes no real exposure history. Existing time/acknowledgement, sensitivity and
+top-five selection rules remain in force: a fresh type is undamped, not guaranteed a card.
+
+**Verified:** new-type versus repeat-type scoring, separate watchlists, refresh stability,
+supporting-event exposure, and an additive migration from the previous exposure schema.

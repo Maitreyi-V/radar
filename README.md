@@ -114,13 +114,13 @@ you can read in one sitting.
 ### Ranking is an attention budget, not a sort
 
 ```
-score = base_weight × recency_decay(occurred_at) × novelty(symbol)
+score = base_weight × recency_decay(occurred_at) × novelty(watchlist, symbol, event_type)
 ```
 
 - **Recency** halves after one complete trading session. Closed overnight hours, weekends and
   exchange holidays do not make market information older when no trading occurred.
-- **Novelty** multiplies by 0.7 per recent appearance, so one permanently jumpy stock cannot
-  monopolise the digest and train you to ignore it.
+- **Novelty** multiplies by 0.7 per recent visit showing the same stock + event type in
+  this watchlist. A previous volume spike never damps a new 52-week breach for that stock.
 - **Top 5 only.** Everything else collapses into one row: *"Nothing unusual in 11 other stocks."*
 - Below a global threshold the digest renders its **empty state**: *"Quiet since you left."*
 
@@ -142,8 +142,10 @@ polls. Summary extrema come from observed quote prices, not a provider's full-da
 
 The digest reads these shared events and session extrema, evaluates the two personal price
 signals against the user's checkpoint/added price, then applies acknowledgement, recency,
-novelty, and ranking. Novelty uses the top cards actually displayed to this watchlist, stored
-separately from market events; refreshes within one checkpoint window count as one visit.
+novelty, and ranking. Novelty uses stock + event-type pairs actually displayed on top cards in this watchlist,
+including supporting events. These are stored separately from market events; refreshes within
+one checkpoint window count as one visit. Legacy symbol-only history applies no penalty because
+its event types are unknown.
 
 A high's timestamp is not necessarily the first crossing. Personal signals use an indexed
 query limited to the relevant session to recover the exact crossing. A midday checkpoint or
@@ -416,7 +418,7 @@ production launch would use managed Postgres (or a persistent disk for a single-
 ## 9. Tests
 
 ```
-139 tests · 9 files
+143 tests · 9 files
 ```
 
 The judgment core is tested deeply, not everything shallowly.

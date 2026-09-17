@@ -1,6 +1,7 @@
 import { db } from '../db/index.js';
 import crypto from 'node:crypto';
-import type { ScoredEvent } from '../significance/score.js';
+import { noveltyKey, type ScoredEvent } from '../significance/score.js';
+import type { DetectedEvent } from '../significance/types.js';
 
 /** Legacy surfaced-event log for the stock drill-down.
  * Shared detection is stored separately in market_events during ingestion.
@@ -50,33 +51,33 @@ export function eventsForSymbol(symbol: string, since?: number, limit = 40): Sto
   });
 }
 
-/**
- * The symbols surfaced in the user's recent digests, newest first — the input novelty
- * damping needs.
- *
- * `before` MUST be the current checkpoint. Novelty exists to damp stocks that were noisy
- * in PREVIOUS visits; events from the window being computed right now are this visit's
- * news and must not damp themselves. Without that bound the digest is not idempotent:
- * viewing it records its own events, and the next refresh scores those same stocks 0.7x,
- * so cards silently drop out on reload — observed live, 4 cards becoming 3.
+/** Only prior visits in THIS watchlist count. Current-window refreshes cannot
+ * damp themselves. Legacy symbol-only exposure rows have no attributable event
+ * types, so their empty event_keys deliberately apply no penalty.
  */
-export function recentDigestSymbols(watchlistId: string, before?: number, buckets = 3): string[][] {
+export function recentDigestEventKeys(watchlistId: string, before?: number, buckets = 3): string[][] {
   if (before === undefined) return [];
-  const rows = db.prepare(`SELECT symbols FROM digest_exposures
+  const rows = db.prepare(`SELECT event_keys FROM digest_exposures
     WHERE watchlist_id = ? AND shown_at < ? ORDER BY shown_at DESC LIMIT ?`)
-    .all(watchlistId, before, buckets) as Array<{ symbols: string }>;
-  return rows.map((row) => JSON.parse(row.symbols) as string[]);
+    .all(watchlistId, before, buckets) as Array<{ event_keys: string }>;
+  return rows.map((row) => JSON.parse(row.event_keys) as string[]);
 }
 
-/** Refreshes in one checkpoint window count as a single visit. Only top cards count. */
-export function recordDigestExposure(watchlistId: string, checkpointId: string, at: number, symbols: string[]): void {
-  const prior = db.prepare(`SELECT symbols FROM digest_exposures WHERE watchlist_id = ? AND checkpoint_id = ?`)
-    .get(watchlistId, checkpointId) as { symbols: string } | undefined;
-  const seen = [...new Set([...(prior ? JSON.parse(prior.symbols) as string[] : []), ...symbols])];
-  db.prepare(`INSERT INTO digest_exposures (watchlist_id, checkpoint_id, shown_at, symbols) VALUES (?, ?, ?, ?)
-    ON CONFLICT(watchlist_id, checkpoint_id) DO UPDATE SET symbols = excluded.symbols`)
-    .run(watchlistId, checkpointId, at, JSON.stringify(seen));
-}
+/** Store event types actually displayed, including supporting events on top cards.
+ * Multiple occurrences and refreshes within one checkpoint window count once.
+ */
+export const recordDigestExposure = db.transaction((
+  watchlistId: string, checkpointId: string, at: number,
+  events: Array<Pick<DetectedEvent, 'symbol' | 'type'>>,
+): void => {
+  const prior = db.prepare(`SELECT symbols, event_keys FROM digest_exposures WHERE watchlist_id = ? AND checkpoint_id = ?`)
+    .get(watchlistId, checkpointId) as { symbols: string; event_keys: string } | undefined;
+  const symbols = [...new Set([...(prior ? JSON.parse(prior.symbols) as string[] : []), ...events.map((e) => e.symbol)])];
+  const keys = [...new Set([...(prior ? JSON.parse(prior.event_keys) as string[] : []), ...events.map(noveltyKey)])];
+  db.prepare(`INSERT INTO digest_exposures (watchlist_id, checkpoint_id, shown_at, symbols, event_keys) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(watchlist_id, checkpoint_id) DO UPDATE SET symbols = excluded.symbols, event_keys = excluded.event_keys`)
+    .run(watchlistId, checkpointId, at, JSON.stringify(symbols), JSON.stringify(keys));
+});
 
 function safeParse(s: string): Record<string, unknown> {
   try { return JSON.parse(s) as Record<string, unknown>; } catch { return {}; }

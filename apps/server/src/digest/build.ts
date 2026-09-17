@@ -7,7 +7,7 @@ import { volatility } from '../significance/stats.js';
 import type { DataMode, Digest, DigestCard, Freshness } from './types.js';
 import { marketPhase, sessionDate, lastSessionClose } from '../ingestion/marketCalendar.js';
 import { STALENESS } from '../config.js';
-import { recordEvents, recordDigestExposure, recentDigestSymbols } from './events.js';
+import { recordEvents, recordDigestExposure, recentDigestEventKeys } from './events.js';
 import { unconfirmed } from '../ingestion/conflict.js';
 import { barsBefore, marketEvents } from '../ingestion/projections.js';
 import { personalEvents } from './personal.js';
@@ -105,7 +105,7 @@ export function buildDigest(opts: {
   watchlistId: string;
   now?: number;
   limit?: number;
-  recentDigestSymbols?: string[][];
+  recentDigestEventKeys?: string[][];
   /** Attention threshold. Lower = more surfaces. Defaults to ATTENTION_THRESHOLD. */
   sensitivity?: number;
   /** Explicit context for deterministic recorded-data demos. */
@@ -126,10 +126,10 @@ export function buildDigest(opts: {
     ? safeParse(cp.snapshot)
     : {};
 
-  // Novelty damping needs the symbols surfaced in PRIOR digests. Bounded by this
+  // Novelty damping needs stock + event-type pairs displayed in PRIOR digests. Bounded by this
   // checkpoint so the current window's own events cannot damp themselves — otherwise
   // viewing the digest changes it, and cards drop out on refresh.
-  const history = opts.recentDigestSymbols ?? recentDigestSymbols(opts.watchlistId, cp?.takenAt);
+  const history = opts.recentDigestEventKeys ?? recentDigestEventKeys(opts.watchlistId, cp?.takenAt);
 
   // A digest built from replayed ticks must NOT write into the user's real event
   // history. Replay is a simulation; letting it record events would damp novelty for
@@ -184,7 +184,7 @@ export function buildDigest(opts: {
           checkpointPrice, refPrice: item.refPrice ?? undefined, acknowledged, sensitivity })
       : [detectVolatilityMove(ctx), detectRefDrawdown(ctx)].filter((event) => event !== null);
     const newlyMeaningful = [...shared, ...personal];
-    const scored = rank(newlyMeaningful, { now, recentDigestSymbols: history, threshold: sensitivity });
+    const scored = rank(newlyMeaningful, { now, recentDigestEventKeys: history, threshold: sensitivity });
 
     if (scored.length === 0) {
       quietSymbols.push(item.symbol);
@@ -234,7 +234,7 @@ export function buildDigest(opts: {
   const top = cards.slice(0, limit);
   if (!builtFromReplay && dataMode !== 'REPLAY') {
     recordEvents(top.flatMap((c) => c.events));
-    recordDigestExposure(opts.watchlistId, cp?.id ?? 'first-visit', now, top.map((c) => c.symbol));
+    recordDigestExposure(opts.watchlistId, cp?.id ?? 'first-visit', now, top.flatMap((c) => c.events));
   }
   // Cards that existed but lost the attention budget still count as "quiet" to the user.
   const overflow = cards.slice(limit).map((c) => c.symbol);

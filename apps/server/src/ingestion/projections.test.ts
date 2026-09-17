@@ -186,13 +186,50 @@ describe('ingestion projections and digest reads', () => {
   });
 
   it('novelty records only displayed cards for this watchlist, not global market events', async () => {
-    const { recentDigestSymbols } = await import('../digest/events.js');
+    const { recentDigestEventKeys } = await import('../digest/events.js');
     writeQuote(quote(103, OPEN, { volume: 3000 }));
-    expect(recentDigestSymbols('w', OPEN + step)).toEqual([]);
+    expect(recentDigestEventKeys('w', OPEN + step)).toEqual([]);
     digest(OPEN);
     digest(OPEN);
-    expect(recentDigestSymbols('w', OPEN + step)).toEqual([[symbol]]);
-    expect(recentDigestSymbols('another-watchlist', OPEN + step)).toEqual([]);
+    expect(recentDigestEventKeys('w', OPEN + step).map((keys) => keys.sort())).toEqual([[`${symbol}:VOLATILITY_MOVE`, `${symbol}:VOLUME_SPIKE`]]);
+    expect(recentDigestEventKeys('another-watchlist', OPEN + step)).toEqual([]);
+  });
+
+  it('keeps a new event type eligible while damping repeats only in their own watchlist', async () => {
+    const { recordDigestExposure, recentDigestEventKeys } = await import('../digest/events.js');
+    for (let i = 1; i <= 3; i++) {
+      recordDigestExposure('w', `prior-${i}`, OPEN - i * step, [{ symbol, type: 'VOLUME_SPIKE' }]);
+    }
+    writeQuote(quote(100, OPEN, { volume: 3000, prevClose: 99, week52High: 100 }));
+    const options = { userId: 'u', watchlistId: 'w', now: OPEN };
+    const first = buildDigest(options);
+    expect(first.cards[0]?.events.map((e) => e.type)).toEqual(['BREACH_52W']);
+    expect(first.cards[0]?.events[0]?.noveltyFactor).toBe(1);
+    expect(buildDigest(options)).toEqual(first);
+    expect(recentDigestEventKeys('w', OPEN + 1)[0]).toEqual([`${symbol}:BREACH_52W`]);
+
+    db.prepare(`INSERT INTO watchlists VALUES ('other','u','Other',1,?)`).run(OPEN);
+    db.prepare(`INSERT INTO watchlist_items VALUES ('other',?,?,100)`).run(symbol, OPEN - 1);
+    db.prepare(`INSERT INTO checkpoints VALUES ('other-cp','u','other',?,?)`)
+      .run(OPEN - 1, JSON.stringify({ [symbol]: { price: 100 } }));
+    try {
+      const other = buildDigest({ ...options, watchlistId: 'other' });
+      expect(other.cards[0]?.events.find((e) => e.type === 'VOLUME_SPIKE')?.noveltyFactor).toBe(1);
+    } finally { db.prepare(`DELETE FROM watchlists WHERE id = 'other'`).run(); }
+  });
+
+  it('adds event-specific history to existing databases without guessing legacy event types', async () => {
+    const { default: SQLite } = await import('better-sqlite3');
+    const { applyColumnMigrations } = await import('../db/migrate.js');
+    const legacy = new SQLite(':memory:');
+    try {
+      legacy.exec(`CREATE TABLE symbols (symbol TEXT, bse_code TEXT, mktcap REAL, tracked INTEGER);
+        CREATE TABLE digest_exposures (watchlist_id TEXT, checkpoint_id TEXT, shown_at INTEGER, symbols TEXT);
+        INSERT INTO digest_exposures VALUES ('w', 'old', 1, '["TEST.NS"]');`);
+      expect(applyColumnMigrations(legacy)).toContain('digest_exposures.event_keys');
+      expect(applyColumnMigrations(legacy)).toEqual([]);
+      expect(legacy.prepare('SELECT event_keys FROM digest_exposures').get()).toEqual({ event_keys: '[]' });
+    } finally { legacy.close(); }
   });
 
   it('personalises the same stored market data for different checkpoint prices', () => {

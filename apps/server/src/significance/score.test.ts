@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  recencyDecay, novelty, scoreEvent, rank,
+  recencyDecay, novelty, noveltyKey, scoreEvent, rank,
   HALF_LIFE_MS, NOVELTY_FACTOR, ATTENTION_THRESHOLD,
 } from './score.js';
 import type { DetectedEvent } from './types.js';
@@ -61,21 +61,34 @@ describe('recencyDecay — measured in TRADING time, not wall-clock', () => {
   });
 });
 
-describe('novelty — stops one noisy stock monopolising the digest', () => {
-  it('is 1 for a symbol not seen recently', () => {
-    expect(novelty('TEST.NS', [['A.NS'], ['B.NS']])).toBe(1);
+describe('novelty — scoped to stock and event type within a watchlist', () => {
+  it('is 1 for a stock/event-type pair not seen recently', () => {
+    expect(novelty(ev(), [['A.NS:VOLATILITY_MOVE'], ['B.NS:VOLATILITY_MOVE']])).toBe(1);
   });
 
-  it('damps once per recent appearance', () => {
-    expect(novelty('TEST.NS', [['TEST.NS']])).toBeCloseTo(NOVELTY_FACTOR, 10);
-    expect(novelty('TEST.NS', [['TEST.NS'], ['TEST.NS']])).toBeCloseTo(NOVELTY_FACTOR ** 2, 10);
+  it('damps once per prior visit containing the same stock and event type', () => {
+    const key = noveltyKey(ev());
+    expect(novelty(ev(), [[key, key]])).toBeCloseTo(NOVELTY_FACTOR, 10);
+    expect(novelty(ev(), [[key], [key]])).toBeCloseTo(NOVELTY_FACTOR ** 2, 10);
   });
 
-  it('lets a fresh stock outrank a repeat offender at equal raw strength', () => {
-    const history = [['NOISY.NS'], ['NOISY.NS'], ['NOISY.NS']];
-    const noisy = scoreEvent(ev({ symbol: 'NOISY.NS' }), { now: NOW, recentDigestSymbols: history });
-    const fresh = scoreEvent(ev({ symbol: 'FRESH.NS' }), { now: NOW, recentDigestSymbols: history });
+  it('lets a fresh stock outrank a repeat at equal raw strength', () => {
+    const key = noveltyKey(ev({ symbol: 'NOISY.NS' }));
+    const history = [[key], [key], [key]];
+    const noisy = scoreEvent(ev({ symbol: 'NOISY.NS' }), { now: NOW, recentDigestEventKeys: history });
+    const fresh = scoreEvent(ev({ symbol: 'FRESH.NS' }), { now: NOW, recentDigestEventKeys: history });
     expect(fresh.score).toBeGreaterThan(noisy.score);
+  });
+
+  it('does not damp a new event type for the same stock', () => {
+    const history = [['TEST.NS:VOLUME_SPIKE'], ['TEST.NS:VOLUME_SPIKE']];
+    expect(scoreEvent(ev({ type: 'VOLUME_SPIKE' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBeCloseTo(0.49);
+    expect(scoreEvent(ev({ type: 'BREACH_52W' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBe(1);
+    expect(scoreEvent(ev({ type: 'REF_DRAWDOWN' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBe(1);
+  });
+
+  it('does not interpret legacy symbol-only history as evidence for an event type', () => {
+    expect(novelty(ev(), [['TEST.NS']])).toBe(1);
   });
 });
 
