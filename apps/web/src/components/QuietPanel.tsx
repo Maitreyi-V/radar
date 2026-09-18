@@ -75,7 +75,19 @@ export function QuietPanel({ count, detail, sensitivity }: {
                       {d.sigmaPct === null ? 'unknown' : `usually ±${d.sigmaPct.toFixed(1)}% a day`}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">{d.reason}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-500">
+                    {d.suppressed ? (
+                      <>
+                        {/* Lead with the signal itself. This row exists because something
+                            DID happen here — it just didn't earn a card — and burying that
+                            under a price verdict is how the quiet table starts lying. */}
+                        <span className="text-slate-400">{d.suppressed.explanation}</span>
+                        {heldBackNote(d) && (
+                          <span className="block text-[10px] text-slate-600 mt-0.5">{heldBackNote(d)}</span>
+                        )}
+                      </>
+                    ) : d.reason}
+                  </td>
                   {math && <>
                     <td className="px-3 py-2.5 text-right num text-slate-600 text-xs">
                       {d.sigmaPct === null ? '—' : `${d.sigmaPct.toFixed(2)}%`}
@@ -100,4 +112,17 @@ export function QuietPanel({ count, detail, sensitivity }: {
       )}
     </div>
   );
+}
+
+/**
+ * The trailing clause of `reason` — "below your attention threshold", "ranked below the
+ * top 5" — with the explanation the server already prefixed it with stripped off, since
+ * the cell renders that on its own line above. Falls back to nothing rather than to the
+ * whole sentence, so a server wording change degrades to a bare explanation, not a
+ * duplicated one.
+ */
+function heldBackNote(d: QuietDetail): string | null {
+  if (!d.suppressed) return null;
+  if (!d.reason.startsWith(d.suppressed.explanation)) return null;
+  return d.reason.slice(d.suppressed.explanation.length).replace(/^\s*—\s*/, '') || null;
 }

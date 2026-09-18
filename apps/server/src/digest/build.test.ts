@@ -250,3 +250,72 @@ describe('buildDigest', () => {
     expect(changed.cards[0]?.events.some((e) => e.dedupKey === `${symbol}:REF_DRAWDOWN:50`)).toBe(true);
   });
 });
+
+/** A watchlist of its own, so one test's symbols can't rank against another's. */
+function isolatedWatchlist(id: string, symbols: string[], refPrice: number | null = null): void {
+  db.prepare(`INSERT INTO watchlists (id,user_id,name,version,created_at) VALUES (?,?,?,1,?)`)
+    .run(id, USER, id, CHECKPOINT);
+  for (const symbol of symbols) {
+    db.prepare(`INSERT INTO watchlist_items (watchlist_id,symbol,added_at,ref_price) VALUES (?,?,?,?)`)
+      .run(id, symbol, CHECKPOINT, refPrice);
+  }
+  db.prepare(`INSERT INTO checkpoints (id,user_id,watchlist_id,taken_at,snapshot) VALUES (?,?,?,?,?)`)
+    .run(`${id}-cp`, USER, id, CHECKPOINT,
+      JSON.stringify(Object.fromEntries(symbols.map((s) => [s, { price: 100 }]))));
+}
+
+describe('quiet explanations', () => {
+  /**
+   * The bug this guards: the quiet row's verdict was computed purely from the PRICE
+   * z-score, so a stock that traded 2.6x its normal volume on a dead-flat tape was
+   * reported as "a quiet day for this stock". True about the price, false about the day.
+   */
+  it('names a suppressed non-price signal instead of giving a price verdict', () => {
+    seedBars('VOLQ.NS', 0.02);                         // sigma ~4%/day, 1000 shares a day
+    seedQuote('VOLQ.NS', 100, { prevClose: 100, volume: 2600 });   // flat price, 2.6x volume
+    isolatedWatchlist('volq-wl', ['VOLQ.NS']);
+
+    // baseScore for a 2.6x spike is ~3.12, so a sensitivity of 5 holds it back.
+    const d = buildDigest({ userId: USER, watchlistId: 'volq-wl', now: NOW, sensitivity: 5 });
+    expect(d.cards).toEqual([]);
+    const row = d.quietDetail.find((q) => q.symbol === 'VOLQ.NS')!;
+
+    expect(row.suppressed?.type).toBe('VOLUME_SPIKE');
+    expect(row.reason).toMatch(/as many shares as it normally does/);
+    expect(row.reason).toMatch(/below your attention threshold/);
+    expect(row.reason).not.toMatch(/quiet day/);
+    // The arithmetic is still there — this adds a field, it doesn't replace the numbers.
+    expect(row.changePct).toBe(0);
+    expect(row.sigmaPct).not.toBeNull();
+  });
+
+  it('still gives the plain price verdict when the stock was genuinely quiet', () => {
+    seedBars('QUIETQ.NS', 0.02);                       // sigma ~4%/day
+    seedQuote('QUIETQ.NS', 100.5, { prevClose: 100 }); // +0.5% = 0.125 sigma, ordinary volume
+    isolatedWatchlist('quietq-wl', ['QUIETQ.NS']);
+
+    const d = buildDigest({ userId: USER, watchlistId: 'quietq-wl', now: NOW });
+    const row = d.quietDetail.find((q) => q.symbol === 'QUIETQ.NS')!;
+
+    expect(row.suppressed).toBeUndefined();
+    expect(row.reason).toBe('a quiet day for this stock');
+  });
+
+  it('explains a card that lost the attention budget rather than just counting it', () => {
+    for (const [symbol, price] of [['OVA.NS', 106], ['OVB.NS', 112]] as const) {
+      seedBars(symbol, 0.005);                         // sigma ~1%/day
+      seedQuote(symbol, price, { prevClose: 100 });
+    }
+    isolatedWatchlist('overflow-wl', ['OVA.NS', 'OVB.NS']);
+
+    // Both clear the threshold; a budget of one card forces the weaker into the quiet list.
+    const d = buildDigest({ userId: USER, watchlistId: 'overflow-wl', now: NOW, limit: 1 });
+    expect(d.cards.map((c) => c.symbol)).toEqual(['OVB.NS']);
+    expect(d.quietSymbols).toEqual(['OVA.NS']);
+
+    const row = d.quietDetail.find((q) => q.symbol === 'OVA.NS')!;
+    expect(row.suppressed?.type).toBe('VOLATILITY_MOVE');
+    expect(row.reason).toMatch(/ranked below the top 1$/);
+    expect(row.changePct).toBe(6);
+  });
+});
