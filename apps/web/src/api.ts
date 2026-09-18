@@ -27,8 +27,6 @@ export interface DigestCard {
 export interface QuietDetail {
   symbol: string; name: string; price: number;
   changePct: number | null; sigmaPct: number | null; z: number | null; reason: string;
-  /** The strongest signal the digest found here and still chose not to show. */
-  suppressed?: { type: string; explanation: string; score: number };
 }
 
 export interface Digest {

@@ -42,12 +42,6 @@ export interface Digest {
     symbol: string; name: string; price: number;
     changePct: number | null; sigmaPct: number | null; z: number | null;
     reason: string;
-    /**
-     * The strongest signal we found on this symbol and still did not show — either it
-     * scored under the attention threshold, or it lost the ranking to better cards.
-     * Absent means the silence really was about the price, and `reason` is the verdict.
-     */
-    suppressed?: { type: string; explanation: string; score: number };
   }>;
   /** The attention threshold this digest was computed with. */
   sensitivity: number;

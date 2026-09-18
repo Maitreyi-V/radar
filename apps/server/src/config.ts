@@ -10,14 +10,7 @@ export const CONFIG = {
   sessionTtlMs: 1000 * 60 * 60 * 24 * 30,
 } as const;
 
-/**
- * Staleness contract thresholds (ms). Surfaced honestly in the UI.
- *
- * MUST STAY IN SYNC with STALENESS in apps/web/src/freshness.ts, where the client
- * re-derives the same labels as a quote ages between ticks. Duplicated by hand for the
- * same reason the `Freshness` type is — two numbers do not justify a shared build
- * target. Change one, change the other.
- */
+/** Staleness contract thresholds (ms). Surfaced honestly in the UI. */
 export const STALENESS = {
   live: 60_000,        // <= 60s  -> LIVE
   delayed: 900_000,    // <= 15m  -> DELAYED
