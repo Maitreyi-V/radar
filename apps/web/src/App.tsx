@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ConflictError, type Digest, type QuoteView, type User, type Watchlist } from './api';
 import { useStream } from './useStream';
+import { freshnessFromAge } from './freshness';
 import { Auth } from './components/Auth';
 import { AddSymbol } from './components/AddSymbol';
 import { WatchlistTable } from './components/WatchlistTable';
@@ -177,8 +178,15 @@ export default function App() {
   });
 
   // Age the freshness chips locally so "12s ago" keeps ticking without polling.
+  // The LABEL is re-derived alongside the number: since D44 removed polling, nothing else
+  // ever downgrades it, so a feed that goes quiet (provider down, breaker open) would sit
+  // on a pulsing green LIVE next to an age well past the threshold. See freshness.ts for
+  // which states are deliberately left alone.
   useEffect(() => {
-    const t = setInterval(() => setQuotes((qs) => qs.map((q) => ({ ...q, ageMs: Date.now() - q.asOf }))), 1000);
+    const t = setInterval(() => setQuotes((qs) => qs.map((q) => {
+      const ageMs = Date.now() - q.asOf;
+      return { ...q, ageMs, freshness: freshnessFromAge(ageMs, q.freshness) };
+    })), 1000);
     return () => clearInterval(t);
   }, []);
 
