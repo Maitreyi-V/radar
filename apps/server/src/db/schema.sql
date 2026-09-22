@@ -86,7 +86,10 @@ CREATE TABLE IF NOT EXISTS events (
   score       REAL NOT NULL,
   occurred_at INTEGER NOT NULL,
   detail      TEXT NOT NULL,               -- JSON: the numbers behind the explanation
-  dedup_key   TEXT NOT NULL UNIQUE         -- 'TCS:BREACH_52W:2026-09-04' -> can never fire twice
+  dedup_key   TEXT NOT NULL UNIQUE,        -- 'TCS:BREACH_52W:2026-09-04' -> one row per occurrence
+  -- A recurrence does not insert a second row: it strengthens this one in place and
+  -- moves updated_at. Holds the STRONGEST reading seen, never the first.
+  updated_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_events_symbol_time ON events(symbol, occurred_at DESC);
 
@@ -107,12 +110,17 @@ CREATE TABLE IF NOT EXISTS session_summaries (
 );
 CREATE INDEX IF NOT EXISTS idx_summaries_interval ON session_summaries(stream, symbol, last_at);
 
+-- Three timestamps, three distinct questions. Keeping them apart is the whole point:
+--   occurred_at     when we FIRST detected this event (never moves once set)
+--   peak_at         when the STRONGEST reading happened (drives "rose as much as X%")
+--   last_updated_at when this ROW last changed (the digest's since-you-left gate)
 CREATE TABLE IF NOT EXISTS market_events (
   stream TEXT NOT NULL,
   symbol TEXT NOT NULL,
   dedup_key TEXT NOT NULL,
   occurred_at INTEGER NOT NULL,
   peak_at INTEGER NOT NULL,
+  last_updated_at INTEGER NOT NULL DEFAULT 0,
   payload TEXT NOT NULL,
   PRIMARY KEY (stream, dedup_key)
 );

@@ -11,9 +11,25 @@ import type DatabaseType from 'better-sqlite3';
  * Additive-only on purpose: a database holding real recorded ticks must never be
  * dropped to apply a schema change.
  */
-const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
+/** `backfill` runs ONCE, immediately after its ALTER, so every row still holds the
+ * column default at that moment and no WHERE guard is needed. It exists so an existing
+ * database keeps behaving exactly as it did before the column was added. */
+const COLUMNS: Array<{ table: string; column: string; ddl: string; backfill?: string }> = [
   { table: 'digest_exposures', column: 'event_keys', ddl: "ALTER TABLE digest_exposures ADD COLUMN event_keys TEXT NOT NULL DEFAULT '[]'" },
   { table: 'quotes', column: 'market_as_of', ddl: 'ALTER TABLE quotes ADD COLUMN market_as_of INTEGER' },
+  // Seeded from peak_at: for every row written before this change, the last time the row
+  // changed WAS the last time its strength improved, so the two are equal historically.
+  {
+    table: 'market_events', column: 'last_updated_at',
+    ddl: 'ALTER TABLE market_events ADD COLUMN last_updated_at INTEGER NOT NULL DEFAULT 0',
+    backfill: 'UPDATE market_events SET last_updated_at = peak_at',
+  },
+  // The legacy log never updated a row, so first occurrence is its only honest timestamp.
+  {
+    table: 'events', column: 'updated_at',
+    ddl: 'ALTER TABLE events ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0',
+    backfill: 'UPDATE events SET updated_at = occurred_at',
+  },
   { table: 'symbols', column: 'bse_code', ddl: 'ALTER TABLE symbols ADD COLUMN bse_code TEXT' },
   { table: 'symbols', column: 'mktcap', ddl: 'ALTER TABLE symbols ADD COLUMN mktcap REAL' },
   { table: 'symbols', column: 'tracked', ddl: 'ALTER TABLE symbols ADD COLUMN tracked INTEGER NOT NULL DEFAULT 0' },
@@ -21,11 +37,12 @@ const COLUMNS: Array<{ table: string; column: string; ddl: string }> = [
 
 export function applyColumnMigrations(db: DatabaseType.Database): string[] {
   const applied: string[] = [];
-  for (const { table, column, ddl } of COLUMNS) {
+  for (const { table, column, ddl, backfill } of COLUMNS) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     if (cols.length === 0) continue;
     if (cols.some((c) => c.name === column)) continue;
     db.exec(ddl);
+    if (backfill) db.exec(backfill);
     applied.push(`${table}.${column}`);
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_symbols_bse ON symbols(bse_code)`);

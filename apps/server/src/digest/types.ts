@@ -1,7 +1,9 @@
 import type { ScoredEvent } from '../significance/score.js';
-
-export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'RECORDED' | 'REPLAY';
-export type DataMode = 'CURRENT' | 'RECORDED' | 'REPLAY';
+//  Freshness is per PRICE ("how old is this number?").
+//  DataMode is per DIGEST ("current feed, recorded demo, or replay?").
+export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'RECORDED' | 'REPLAY'; // how old is this number 
+export type DataMode = 'CURRENT' | 'RECORDED' | 'REPLAY'; // what kind of data is this whole thing built from
+// one stock's story 
 
 export interface DigestCard {
   symbol: string;
@@ -51,5 +53,5 @@ export interface Digest {
   /** Symbols we could not price at all (provider gaps) — surfaced, never hidden. */
   unavailable: string[];
   /** Symbols where two providers disagreed materially; the shown price is the incumbent. */
-  unconfirmed: Array<{ symbol: string; reason: string }>;
+  unconfirmed: Array<{ symbol: string; reason: string }>;// bse and yahoo disagree by 1.2%...carried in the payload 
 }

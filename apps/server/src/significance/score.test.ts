@@ -6,11 +6,15 @@ import {
 import type { DetectedEvent } from './types.js';
 
 const NOW = Date.UTC(2026, 8, 4, 10, 0);
+/** The IST session NOW falls in — 15:30 on Fri 4 Sep 2026. */
+const SESSION = '2026-09-04';
+const NEXT_SESSION = '2026-09-07';   // the following Monday
 
 const ev = (over: Partial<DetectedEvent> = {}): DetectedEvent => ({
   symbol: 'TEST.NS', type: 'VOLATILITY_MOVE',
   magnitude: 2, baseScore: 4, occurredAt: NOW,
-  detail: {}, dedupKey: 'TEST.NS:X:1', explanation: 'something happened',
+  detail: {}, dedupKey: 'TEST.NS:X:1', sessionDate: SESSION,
+  explanation: 'something happened',
   ...over,
 });
 
@@ -63,7 +67,7 @@ describe('recencyDecay — measured in TRADING time, not wall-clock', () => {
 
 describe('novelty — scoped to stock and event type within a watchlist', () => {
   it('is 1 for a stock/event-type pair not seen recently', () => {
-    expect(novelty(ev(), [['A.NS:VOLATILITY_MOVE'], ['B.NS:VOLATILITY_MOVE']])).toBe(1);
+    expect(novelty(ev(), [[`A.NS:VOLATILITY_MOVE:${SESSION}`], [`B.NS:VOLATILITY_MOVE:${SESSION}`]])).toBe(1);
   });
 
   it('damps once per prior visit containing the same stock and event type', () => {
@@ -81,14 +85,49 @@ describe('novelty — scoped to stock and event type within a watchlist', () => 
   });
 
   it('does not damp a new event type for the same stock', () => {
-    const history = [['TEST.NS:VOLUME_SPIKE'], ['TEST.NS:VOLUME_SPIKE']];
+    const history = [[`TEST.NS:VOLUME_SPIKE:${SESSION}`], [`TEST.NS:VOLUME_SPIKE:${SESSION}`]];
     expect(scoreEvent(ev({ type: 'VOLUME_SPIKE' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBeCloseTo(0.49);
     expect(scoreEvent(ev({ type: 'BREACH_52W' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBe(1);
     expect(scoreEvent(ev({ type: 'REF_DRAWDOWN' }), { now: NOW, recentDigestEventKeys: history }).noveltyFactor).toBe(1);
   });
 
+  it('does not carry damping across trading days — novelty is a within-session budget', () => {
+    // Shown three times yesterday. Today's spike is a NEW event and must open at full
+    // strength; punishing it for yesterday would bury genuinely fresh news.
+    const yesterday = [[`TEST.NS:VOLUME_SPIKE:${SESSION}`], [`TEST.NS:VOLUME_SPIKE:${SESSION}`], [`TEST.NS:VOLUME_SPIKE:${SESSION}`]];
+    const today = ev({ type: 'VOLUME_SPIKE', sessionDate: NEXT_SESSION });
+    expect(novelty(today, yesterday)).toBe(1);
+    // ...while a repeat within the SAME session still damps, once per prior visit.
+    expect(novelty(ev({ type: 'VOLUME_SPIKE' }), yesterday)).toBeCloseTo(NOVELTY_FACTOR ** 3, 10);
+  });
+
+  it('keeps damping a Friday event reopened over the weekend — it is still the same event', () => {
+    // The key follows the EVENT's session, not the viewing date, so Saturday and Sunday
+    // visits do not each look brand new.
+    const friday = ev({ sessionDate: SESSION });
+    expect(noveltyKey(friday)).toBe(`TEST.NS:VOLATILITY_MOVE:${SESSION}`);
+    expect(novelty(friday, [[noveltyKey(friday)], [noveltyKey(friday)]])).toBeCloseTo(NOVELTY_FACTOR ** 2, 10);
+  });
+
   it('does not interpret legacy symbol-only history as evidence for an event type', () => {
     expect(novelty(ev(), [['TEST.NS']])).toBe(1);
+  });
+});
+
+describe('recency anchors to the last strength change', () => {
+  it('scores a strengthened event as news from when it strengthened, not first detection', () => {
+    const FRI_OPEN = Date.UTC(2026, 8, 4, 3, 45);          // 09:15 IST
+    // Same event: first detected at the open, intensified right before we scored it.
+    const stale = scoreEvent(ev({ occurredAt: FRI_OPEN }), { now: NOW });
+    const restated = scoreEvent(ev({ occurredAt: FRI_OPEN, lastUpdatedAt: NOW }), { now: NOW });
+    expect(restated.recency).toBe(1);
+    expect(restated.recency).toBeGreaterThan(stale.recency);
+    expect(restated.score).toBeGreaterThan(stale.score);
+  });
+
+  it('falls back to occurredAt for an event that never restated', () => {
+    const e = ev({ occurredAt: NOW });
+    expect(scoreEvent(e, { now: NOW }).recency).toBe(scoreEvent({ ...e, lastUpdatedAt: NOW }, { now: NOW }).recency);
   });
 });
 

@@ -249,4 +249,65 @@ describe('buildDigest', () => {
     expect(changed.cards[0]?.symbol).toBe(symbol);
     expect(changed.cards[0]?.events.some((e) => e.dedupKey === `${symbol}:REF_DRAWDOWN:50`)).toBe(true);
   });
+
+  /**
+   * VOLUME_SPIKE keeps ONE dedup key for the whole session, so it cannot signal "I got
+   * bigger" the way REF_DRAWDOWN does by crossing a bucket. Without a last-updated
+   * clock it would stay silent all session once acknowledged, no matter how far the
+   * volume ran — and with a clock but no materiality guard it would reopen on every
+   * poll, because volume is cumulative and rises on every tick.
+   */
+  it('reopens an acknowledged volume spike when it strengthens materially, and not otherwise', () => {
+    const wl = 'vol-wl';
+    const symbol = 'VOL.NS';
+    const base = Date.now();
+    db.prepare(`INSERT INTO watchlists (id,user_id,name,version,created_at) VALUES (?,?,?,1,?)`)
+      .run(wl, USER, 'Volume', NOW);
+    db.prepare(
+      `INSERT INTO watchlist_items (watchlist_id,symbol,added_at,ref_price) VALUES (?,?,?,?)`,
+    ).run(wl, symbol, NOW, 100);
+    // Flat price against a 2% sigma and a ref price it never left: volume is the only
+    // thing that can fire here, which keeps the assertions unambiguous.
+    seedBars(symbol, 0.02);
+    seedQuote(symbol, 100, { prevClose: 100, volume: 3000, asOf: base });
+    db.prepare(
+      `INSERT INTO checkpoints (id,user_id,watchlist_id,taken_at,snapshot) VALUES (?,?,?,?,?)`,
+    ).run('vol-before', USER, wl, base - 60_000, JSON.stringify({ [symbol]: { price: 100 } }));
+
+    const before = buildDigest({ userId: USER, watchlistId: wl, now: base + 1_000, sensitivity: 0.8 });
+    expect(before.cards[0]?.events.map((e) => e.type)).toEqual(['VOLUME_SPIKE']);
+    const spikeKey = before.cards[0]!.events[0]!.dedupKey;
+
+    // Mark caught up at 3x — the condition is now acknowledged and must go quiet.
+    writeCheckpoint(USER, wl);
+    expect(buildDigest({ userId: USER, watchlistId: wl, now: base + 2_000, sensitivity: 0.8 }).cards).toEqual([]);
+
+    // 3x -> 4x of average volume: a 33% gain in weight. Same dedup key, so the ONLY
+    // thing that can earn it a second showing is last-updated beating the checkpoint.
+    seedQuote(symbol, 100, { prevClose: 100, volume: 4000, asOf: base + 60_000 });
+    const stronger = buildDigest({ userId: USER, watchlistId: wl, now: base + 61_000, sensitivity: 0.8 });
+    expect(stronger.cards[0]?.events.map((e) => e.dedupKey)).toEqual([spikeKey]);
+    expect(stronger.cards[0]?.events[0]?.magnitude).toBe(4);
+
+    // Acknowledge 4x explicitly, then drift to 4.1x. The row records the newer ratio,
+    // but an immaterial gain must not reopen a card the user just dismissed.
+    db.prepare(
+      `INSERT INTO checkpoints (id,user_id,watchlist_id,taken_at,snapshot) VALUES (?,?,?,?,?)`,
+    ).run('vol-after', USER, wl, base + 90_000,
+      JSON.stringify({ [symbol]: { price: 100, acknowledgedEventKeys: [spikeKey] } }));
+    seedQuote(symbol, 100, { prevClose: 100, volume: 4100, asOf: base + 120_000 });
+    const drift = buildDigest({ userId: USER, watchlistId: wl, now: base + 121_000, sensitivity: 0.8 });
+    expect(drift.cards).toEqual([]);
+    expect(drift.isQuiet).toBe(true);
+
+    // 4.1x -> 6x is material again, so the card comes back — but QUIETER. It has been
+    // shown in two prior visits this session, so novelty has damped it to 0.7^2. This is
+    // the whole contract: a strengthening event resurfaces without shouting afresh.
+    seedQuote(symbol, 100, { prevClose: 100, volume: 6000, asOf: base + 150_000 });
+    const again = buildDigest({ userId: USER, watchlistId: wl, now: base + 151_000, sensitivity: 0.8 });
+    expect(again.cards[0]?.events.map((e) => e.type)).toEqual(['VOLUME_SPIKE']);
+    expect(again.cards[0]?.events[0]?.magnitude).toBe(6);
+    expect(again.cards[0]?.events[0]?.noveltyFactor).toBeCloseTo(0.7 ** 2, 10);
+    expect(again.cards[0]!.events[0]!.score).toBeLessThan(stronger.cards[0]!.events[0]!.baseScore);
+  });
 });

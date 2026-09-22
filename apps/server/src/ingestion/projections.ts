@@ -31,10 +31,24 @@ const saveSummary = db.prepare(`INSERT INTO session_summaries
   first_at=excluded.first_at, last_at=excluded.last_at, open_quote=excluded.open_quote,
   high_quote=excluded.high_quote, low_quote=excluded.low_quote, latest_quote=excluded.latest_quote,
   max_volume=excluded.max_volume`);
-const eventFor = db.prepare(`SELECT payload FROM market_events WHERE stream = ? AND dedup_key = ?`);
-const saveEvent = db.prepare(`INSERT INTO market_events (stream, symbol, dedup_key, occurred_at, peak_at, payload)
-  VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (stream, dedup_key) DO UPDATE SET
-  occurred_at=excluded.occurred_at, peak_at=excluded.peak_at, payload=excluded.payload`);
+const eventFor = db.prepare(`SELECT payload, last_updated_at FROM market_events WHERE stream = ? AND dedup_key = ?`);
+
+/**
+ * How much stronger a recurrence must be before it counts as an UPDATE the user
+ * deserves to see again.
+ *
+ * Volume is cumulative: it rises on literally every tick. Without this guard an
+ * acknowledged VOLUME_SPIKE would re-qualify on every single poll for the rest of the
+ * session, which is precisely the "watchlist that always screams" this product exists
+ * to refuse. 25% is deliberately coarse — 4x -> 5x reopens the card, 4.00x -> 4.05x
+ * does not. The row still records the latest numbers either way; only the
+ * user-facing "this changed" clock is held back.
+ */
+const MATERIAL_GAIN = 1.25;
+const saveEvent = db.prepare(`INSERT INTO market_events (stream, symbol, dedup_key, occurred_at, peak_at, last_updated_at, payload)
+  VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (stream, dedup_key) DO UPDATE SET
+  occurred_at=excluded.occurred_at, peak_at=excluded.peak_at,
+  last_updated_at=excluded.last_updated_at, payload=excluded.payload`);
 const saveVersion = db.prepare(`INSERT INTO market_event_versions (stream, dedup_key, observed_at, payload)
   VALUES (?, ?, ?, ?) ON CONFLICT (stream, dedup_key, observed_at) DO UPDATE SET payload=excluded.payload`);
 
@@ -70,36 +84,67 @@ export function projectQuote(q: Quote): void {
     if (event.type === 'STREAK' && bars.length) {
       event.dedupKey = `${q.symbol}:STREAK:${bars[bars.length - 1]!.date}:${event.magnitude}`;
     }
-    const row = eventFor.get(stream, event.dedupKey) as { payload: string } | undefined;
+    const row = eventFor.get(stream, event.dedupKey) as { payload: string; last_updated_at: number } | undefined;
     const prior: DetectedEvent | undefined = row && JSON.parse(row.payload);
     const stronger = !prior || event.baseScore > prior.baseScore ||
       (event.baseScore === prior.baseScore && Math.abs(event.magnitude) > Math.abs(prior.magnitude)) ||
       (event.type === 'BREACH_52W' &&
         Number(event.detail.price) * event.magnitude > Number(prior.detail.price) * prior.magnitude);
+    // BREACH_52W carries a flat weight, so it can never show a score gain at all — and
+    // it only re-fires when the price sets a genuinely NEW extreme. That is a discrete
+    // milestone, not a per-tick accumulation, so for it any strengthening is material.
+    const material = !prior || (stronger && (
+      event.type === 'BREACH_52W' || event.baseScore >= prior.baseScore * MATERIAL_GAIN
+    ));
+    // Nothing changed: the row is left alone, so last_updated_at deliberately does NOT
+    // move. A re-detection that tells us nothing new is not an update.
     if (!stronger && prior && event.occurredAt >= prior.occurredAt) continue;
     const firstAt = Math.min(prior?.occurredAt ?? event.occurredAt, event.occurredAt);
     const strongest = stronger ? event : prior!;
     const peakAt = stronger ? q.asOf : Number(prior!.detail.peakAt);
-    const saved: DetectedEvent = { ...strongest, occurredAt: firstAt,
+    // The timestamp the digest tests against the user's checkpoint. Held at its previous
+    // value for an immaterial gain, so the payload below still reports the newest numbers
+    // without reopening a card the user has already acknowledged.
+    const lastUpdatedAt = material ? q.asOf : (row?.last_updated_at ?? q.asOf);
+    const saved: DetectedEvent = { ...strongest, occurredAt: firstAt, lastUpdatedAt,
       detail: { ...strongest.detail, firstDetectedAt: firstAt, peakAt } };
     const payload = JSON.stringify(saved);
-    saveEvent.run(stream, q.symbol, event.dedupKey, firstAt, peakAt, payload);
+    saveEvent.run(stream, q.symbol, event.dedupKey, firstAt, peakAt, lastUpdatedAt, payload);
     saveVersion.run(stream, event.dedupKey, q.asOf, payload);
   }
 }
 
-/** Compact event lookup; historical reads select the last strength known at `until`. */
+/**
+ * Compact event lookup; historical reads select the last strength known at `until`.
+ *
+ * An event is in-window if it STARTED after `after` **or** was last updated after it.
+ * The second half is the point: an event first seen at 10:00, checkpointed at 11:00 and
+ * strengthened at 12:00 has `occurred_at = 10:00` forever, so an occurred_at-only window
+ * hides exactly the thing the user came back to find out.
+ */
 export function marketEvents(symbol: string, stream: Stream, after: number, until: number): DetectedEvent[] {
-  const rows = db.prepare(`SELECT dedup_key, peak_at, payload FROM market_events
-    WHERE stream = ? AND symbol = ? AND occurred_at > ? AND occurred_at <= ?
-    ORDER BY occurred_at, dedup_key`).all(stream, symbol, after, until) as
-    Array<{ dedup_key: string; peak_at: number; payload: string }>;
+  const rows = db.prepare(`SELECT dedup_key, occurred_at, last_updated_at, payload FROM market_events
+    WHERE stream = ? AND symbol = ? AND occurred_at <= ?
+      AND (occurred_at > ? OR last_updated_at > ?)
+    ORDER BY occurred_at, dedup_key`).all(stream, symbol, until, after, after) as
+    Array<{ dedup_key: string; occurred_at: number; last_updated_at: number; payload: string }>;
   return rows.flatMap((row) => {
-    if (row.peak_at <= until) return [JSON.parse(row.payload) as DetectedEvent];
-    const version = db.prepare(`SELECT payload FROM market_event_versions
+    // The row has not changed since `until`, so what it holds now is what it held then.
+    if (row.last_updated_at <= until) return [JSON.parse(row.payload) as DetectedEvent];
+    // It changed AFTER the horizon we are reading at. Rewind to the strength known at
+    // `until` — and re-test the window against THAT version's timestamp, because the
+    // update that qualified this row may not have happened yet at `until`.
+    const version = db.prepare(`SELECT observed_at, payload FROM market_event_versions
       WHERE stream = ? AND dedup_key = ? AND observed_at <= ? ORDER BY observed_at DESC LIMIT 1`)
-      .get(stream, row.dedup_key, until) as { payload: string } | undefined;
-    return version ? [JSON.parse(version.payload) as DetectedEvent] : [];
+      .get(stream, row.dedup_key, until) as { observed_at: number; payload: string } | undefined;
+    if (!version) return [];
+    const parsed = JSON.parse(version.payload) as DetectedEvent;
+    // Test the window against the payload's OWN clock, not observed_at: a version is
+    // written on every strength change, but an immaterial one deliberately did not move
+    // lastUpdatedAt. Using observed_at here would let the as-of read resurface something
+    // the current read correctly keeps hidden.
+    if (row.occurred_at <= after && (parsed.lastUpdatedAt ?? version.observed_at) <= after) return [];
+    return [parsed];
   });
 }
 

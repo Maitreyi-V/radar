@@ -17,10 +17,10 @@ export const THRESHOLDS = {
   refDrawdownPct: 10,      // % from the user's entry reference
 } as const;
 
-const pct = (a: number, b: number): number => ((a - b) / b) * 100;
+const pct = (a: number, b: number): number => ((a - b) / b) * 100; // % change 
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 const r2 = (n: number): number => Math.round(n * 100) / 100;
-const dir = (n: number): string => (n >= 0 ? 'rose' : 'fell');
+const dir = (n: number): string => (n >= 0 ? 'rose' : 'fell');  // dir(-2.4) →  'fell'
 
 /**
  * VOLATILITY_MOVE — the flagship detector.
@@ -34,7 +34,7 @@ const dir = (n: number): string => (n >= 0 ? 'rose' : 'fell');
  * otherwise the previous close.
  */
 export function detectVolatilityMove(ctx: SymbolContext): DetectedEvent | null {
-  const base = ctx.checkpointPrice ?? ctx.prevClose;
+  const base = ctx.checkpointPrice ?? ctx.prevClose; // Have a checkpoint? Measure from the price you last saw, else measure from the previous close. If neither exists, we cannot compute a meaningful change.
   if (!base || base <= 0) return null;
 
   const sigma = volatility(ctx.bars, 30);
@@ -49,7 +49,6 @@ export function detectVolatilityMove(ctx: SymbolContext): DetectedEvent | null {
     symbol: ctx.symbol,
     type: 'VOLATILITY_MOVE',
     magnitude: z,
-    // Clamp: a 40-sigma print (bad tick, corporate action) must not monopolise the digest.
     baseScore: clamp(Math.abs(z), 0, 8) * 2.0,
     occurredAt: ctx.asOf,
     detail: {
@@ -58,6 +57,7 @@ export function detectVolatilityMove(ctx: SymbolContext): DetectedEvent | null {
       baseline: ctx.checkpointPrice ? 'checkpoint' : 'previous close',
     },
     dedupKey: `${ctx.symbol}:VOLATILITY_MOVE:${ctx.sessionDate}:${Math.abs(z).toFixed(1)}`,
+    sessionDate: ctx.sessionDate,
     // Plain English first. A z-score of 1.6 simply means "1.6x its usual daily move",
     // which needs no statistics background. The sigma itself stays in `detail` for
     // anyone who wants to audit the arithmetic.
@@ -69,7 +69,7 @@ export function detectVolatilityMove(ctx: SymbolContext): DetectedEvent | null {
 
 /** VOLUME_SPIKE — conviction behind the move. Price without volume is often noise. */
 export function detectVolumeSpike(ctx: SymbolContext): DetectedEvent | null {
-  if (ctx.volume === null || ctx.volume <= 0) return null;
+  if (ctx.volume === null || ctx.volume <= 0) return null; // not enough data 
   const avg = averageVolume(ctx.bars, 20);
   if (avg === null || avg <= 0) return null;
 
@@ -84,6 +84,7 @@ export function detectVolumeSpike(ctx: SymbolContext): DetectedEvent | null {
     occurredAt: ctx.asOf,
     detail: { ratio: r2(ratio), volume: ctx.volume, avgVolume: Math.round(avg) },
     dedupKey: `${ctx.symbol}:VOLUME_SPIKE:${ctx.sessionDate}`,
+    sessionDate: ctx.sessionDate,
     explanation: `${short(ctx.symbol)} traded ${r1(ratio)}× as many shares as it normally does.`,
   };
 }
@@ -91,7 +92,7 @@ export function detectVolumeSpike(ctx: SymbolContext): DetectedEvent | null {
 /** BREACH_52W — a flat, unambiguous, well-understood milestone. Flat weight by design. */
 export function detectBreach52w(ctx: SymbolContext): DetectedEvent | null {
   const computed = fiftyTwoWeek(ctx.bars);
-  const high = ctx.week52High ?? computed.high;
+  const high = ctx.week52High ?? computed.high; // if the provider did not give a 52w range, compute it from the bars. If the provider did give a 52w range, use it. If the provider gave a 52w range but it is null, use the computed value. If both are null, we cannot detect a breach.
   const low = ctx.week52Low ?? computed.low;
 
   // Only counts if the level was crossed SINCE the checkpoint — otherwise we would
@@ -103,6 +104,7 @@ export function detectBreach52w(ctx: SymbolContext): DetectedEvent | null {
       symbol: ctx.symbol, type: 'BREACH_52W', magnitude: 1, baseScore: 3.0, occurredAt: ctx.asOf,
       detail: { level: r2(high), price: r2(ctx.price), side: 'high' },
       dedupKey: `${ctx.symbol}:BREACH_52W_HIGH:${ctx.sessionDate}`,
+      sessionDate: ctx.sessionDate,
       explanation: `${short(ctx.symbol)} touched a 52-week high at ₹${r2(ctx.price)}.`,
     };
   }
@@ -111,6 +113,7 @@ export function detectBreach52w(ctx: SymbolContext): DetectedEvent | null {
       symbol: ctx.symbol, type: 'BREACH_52W', magnitude: -1, baseScore: 3.0, occurredAt: ctx.asOf,
       detail: { level: r2(low), price: r2(ctx.price), side: 'low' },
       dedupKey: `${ctx.symbol}:BREACH_52W_LOW:${ctx.sessionDate}`,
+      sessionDate: ctx.sessionDate,
       explanation: `${short(ctx.symbol)} broke to a 52-week low at ₹${r2(ctx.price)}.`,
     };
   }
@@ -118,6 +121,10 @@ export function detectBreach52w(ctx: SymbolContext): DetectedEvent | null {
 }
 
 /** GAP_OPEN — overnight repricing. Distinct from an intraday drift of the same size. */
+// yesterday's close   ₹100
+// today's open        ₹106
+
+// gap = 6%,  its own σ = 2%   →   z = 3.0   →  FIRES
 export function detectGapOpen(ctx: SymbolContext): DetectedEvent | null {
   if (ctx.dayOpen === null || ctx.prevClose === null || ctx.prevClose <= 0) return null;
   const sigma = volatility(ctx.bars, 30);
@@ -136,6 +143,7 @@ export function detectGapOpen(ctx: SymbolContext): DetectedEvent | null {
     occurredAt: ctx.asOf,
     detail: { gapPct: r2(gapPct), z: r2(z), open: r2(ctx.dayOpen), prevClose: r2(ctx.prevClose) },
     dedupKey: `${ctx.symbol}:GAP_OPEN:${ctx.sessionDate}`,
+    sessionDate: ctx.sessionDate,
     explanation:
       `${short(ctx.symbol)} opened ${gapPct >= 0 ? 'up' : 'down'} ${Math.abs(r1(gapPct))}% ` +
       `from where it closed — ${Math.abs(r1(z))}× its usual daily move.`,
@@ -157,6 +165,7 @@ export function detectStreak(ctx: SymbolContext): DetectedEvent | null {
     occurredAt: ctx.asOf,
     detail: { days, direction: up ? 'up' : 'down' },
     dedupKey: `${ctx.symbol}:STREAK:${ctx.sessionDate}:${days}${up ? 'U' : 'D'}`,
+    sessionDate: ctx.sessionDate,
     explanation: `${short(ctx.symbol)} has closed ${up ? 'higher' : 'lower'} ${days} sessions in a row.`,
   };
 }
@@ -182,6 +191,9 @@ export function detectRefDrawdown(ctx: SymbolContext): DetectedEvent | null {
     detail: { changePct: r2(change), refPrice: r2(ctx.refPrice), price: r2(ctx.price) },
     // Bucketed by 10% so it re-fires at 10, 20, 30... but not on every tick in between.
     dedupKey: `${ctx.symbol}:REF_DRAWDOWN:${Math.trunc(change / 10) * 10}`,
+    // The dedup key is deliberately undated (a 10% drawdown persists across sessions),
+    // but novelty damping is still per-session — hence sessionDate carried separately.
+    sessionDate: ctx.sessionDate,
     explanation:
       `${short(ctx.symbol)} is ${change >= 0 ? 'up' : 'down'} ${Math.abs(r1(change))}% ` +
       `since you added it at ₹${r2(ctx.refPrice)}.`,
@@ -193,7 +205,8 @@ export const ALL_DETECTORS = [
   detectGapOpen, detectStreak, detectRefDrawdown,
 ] as const;
 
-/** Run every detector. Order is stable so output is deterministic. */
+/** Every detector that fires for this context. Used to capture the conditions a user
+ * acknowledges at a checkpoint, so persistent ones do not immediately reappear. */
 export function detectAll(ctx: SymbolContext): DetectedEvent[] {
   const out: DetectedEvent[] = [];
   for (const d of ALL_DETECTORS) {
@@ -202,6 +215,8 @@ export function detectAll(ctx: SymbolContext): DetectedEvent[] {
   }
   return out;
 }
+
+
 
 /** 'TATAMOTORS.NS' -> 'TATAMOTORS' for display. */
 export const short = (s: string): string => s.replace(/\.(NS|BO)$/, '');

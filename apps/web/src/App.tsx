@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ConflictError, type Digest, type QuoteView, type User, type Watchlist } from './api';
 import { useStream } from './useStream';
+import { noteServerTime } from './freshness';
 import { Auth } from './components/Auth';
 import { AddSymbol } from './components/AddSymbol';
 import { WatchlistTable } from './components/WatchlistTable';
@@ -21,7 +22,14 @@ export default function App() {
   const [sensitivity, setSensitivity] = useState(1.5);
   const [isDemo, setIsDemo] = useState(false);
   const [quotes, setQuotes] = useState<QuoteView[]>([]);
-  const [digest, setDigest] = useState<Digest | null>(null);
+  const [digest, setDigestState] = useState<Digest | null>(null);
+  /** Every digest carries the server's own clock. Anchoring to it means a user whose
+   * laptop clock is minutes off still sees honest data ages, now that the freshness
+   * LABEL — not just the age text — is re-derived in the browser. */
+  const setDigest = useCallback((d: Digest | null) => {
+    if (d) noteServerTime(d.generatedAt);
+    setDigestState(d);
+  }, []);
   const [tab, setTab] = useState<Tab>('digest');
   const [open, setOpen] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -176,11 +184,8 @@ export default function App() {
     if (ev.type === 'checkpoint' || ev.type === 'watchlist') void refresh();
   });
 
-  // Age the freshness chips locally so "12s ago" keeps ticking without polling.
-  useEffect(() => {
-    const t = setInterval(() => setQuotes((qs) => qs.map((q) => ({ ...q, ageMs: Date.now() - q.asOf }))), 1000);
-    return () => clearInterval(t);
-  }, []);
+  // NOTE: no interval here any more. FreshnessChip derives its own age and label from
+  // `asOf`, so rebuilding the whole quotes array once a second bought nothing.
 
   // ---- actions ----
   async function add(symbol: string) {

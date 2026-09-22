@@ -75,7 +75,11 @@ export function personalEvents(opts: {
             `${Math.abs(Number(event.detail.z))}× its usual daily move of about ±${event.detail.sigmaPct}%.`
           : `${short(symbol)} was ${change >= 0 ? 'up' : 'down'} as much as ${Math.abs(change)}% since you added it at ₹${event.detail.refPrice}.`
         : event.explanation;
-      events.push({ ...event, occurredAt: first.asOf, explanation,
+      // Personal events are recomputed from scratch every digest, so there is no stored
+      // row to "update". Their equivalent of a strength change is the peak itself: the
+      // extreme is the news, not the first moment the threshold was crossed. Setting it
+      // here keeps personal and shared events on one recency rule.
+      events.push({ ...event, occurredAt: first.asOf, lastUpdatedAt: peakAt, explanation,
         detail: { ...event.detail, firstDetectedAt: first.asOf, peakAt } });
     }
   }

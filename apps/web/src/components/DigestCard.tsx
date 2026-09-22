@@ -53,7 +53,7 @@ export function DigestCardView({ card, rank, onOpen }: {
             <span className="opacity-50">· {istTime(e.occurredAt)}</span>
           </span>
         ))}
-        <span className="ml-auto"><FreshnessChip freshness={card.freshness} showAge={false} /></span>
+        <span className="ml-auto"><FreshnessChip freshness={card.freshness} asOf={card.asOf} showAge={false} /></span>
       </div>
     </button>
   );

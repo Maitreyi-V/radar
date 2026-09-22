@@ -31,11 +31,12 @@ export function freshnessOf(asOf: number, now: number, source?: string, dataMode
     return 'MARKET_CLOSED';
   }
   const age = now - asOf;
-  if (age <= STALENESS.live) return 'LIVE';
-  if (age <= STALENESS.delayed) return 'DELAYED';
+  if (age <= STALENESS.live) return 'LIVE';// <=3m
+  if (age <= STALENESS.delayed) return 'DELAYED';  // <=15m
   return 'STALE';
 }
 
+//the newest real (non-replay) quote for a symbol at or before now.
 const latestNonReplayStmt = db.prepare(
   `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
           week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, market_as_of AS marketAsOf, source
@@ -43,6 +44,8 @@ const latestNonReplayStmt = db.prepare(
    WHERE symbol = ? AND source <> 'replay' AND as_of <= ?
    ORDER BY as_of DESC, id DESC LIMIT 1`,
 );
+
+//the same, but only from the replay stream.
 const latestReplayStmt = db.prepare(
   `SELECT price, volume, day_open AS dayOpen, prev_close AS prevClose,
           week52_high AS week52High, week52_low AS week52Low, as_of AS asOf, market_as_of AS marketAsOf, source
@@ -50,23 +53,25 @@ const latestReplayStmt = db.prepare(
    WHERE symbol = ? AND source = 'replay' AND as_of <= ?
    ORDER BY as_of DESC, id DESC LIMIT 1`,
 );
+// the symbols in this watchlist, each with its add price, add time, and display name.
 const itemsStmt = db.prepare(
   `SELECT wi.symbol, wi.ref_price AS refPrice, wi.added_at AS addedAt,
           COALESCE(s.name, wi.symbol) AS name
    FROM watchlist_items wi LEFT JOIN symbols s ON s.symbol = wi.symbol
    WHERE wi.watchlist_id = ? ORDER BY wi.added_at ASC`,
 );
+// this user's most recent checkpoint for this watchlist: when it was taken and what they saw.
 const checkpointStmt = db.prepare(
   `SELECT id, taken_at AS takenAt, snapshot FROM checkpoints
    WHERE watchlist_id = ? AND user_id = ? ORDER BY taken_at DESC LIMIT 1`,
 );
 
 interface ItemRow { symbol: string; refPrice: number | null; addedAt: number; name: string }
-interface QuoteRow {
+interface QuoteRow { //latest quote
   price: number; volume: number | null; dayOpen: number | null; prevClose: number | null;
   week52High: number | null; week52Low: number | null; asOf: number; marketAsOf?: number; source: string;
 }
-
+//adapter  DB row-> the shape detectors expect.
 function contextForQuote(
   symbol: string,
   quote: QuoteRow,
@@ -89,6 +94,8 @@ function contextForQuote(
     checkpointAt,
     refPrice,
     sessionDate: sessionDate(quote.marketAsOf ?? quote.asOf),
+//     asOf         =  when this row was created
+//    marketAsOf   =  the ORIGINAL market time (only set on replayed ticks)
   };
 }
 
@@ -112,18 +119,18 @@ export function buildDigest(opts: {
   dataMode?: DataMode;
   dataSessionDate?: string;
 }): Digest {
-  const now = opts.now ?? Date.now();
+  const now = opts.now ?? Date.now(); //used for recency, novelty, and freshness calculations
   const limit = opts.limit ?? 5;
   const sensitivity = opts.sensitivity ?? ATTENTION_THRESHOLD;
   let dataMode = opts.dataMode ?? 'CURRENT';
 
-  const items = itemsStmt.all(opts.watchlistId) as ItemRow[];
+  const items = itemsStmt.all(opts.watchlistId) as ItemRow[]; // what youre watching
   const cp = checkpointStmt.get(opts.watchlistId, opts.userId) as
     | { id: string; takenAt: number; snapshot: string }
-    | undefined;
+    | undefined; // what you last saw
 
   const snapshot: Record<string, { price: number; acknowledgedEventKeys?: string[] }> = cp
-    ? safeParse(cp.snapshot)
+    ? safeParse(cp.snapshot) // have u seen this event before? if so, what did u see?
     : {};
 
   // Novelty damping needs stock + event-type pairs displayed in PRIOR digests. Bounded by this
@@ -170,15 +177,21 @@ export function buildDigest(opts: {
 
     // A checkpoint is an acknowledgement boundary, not just a price baseline.
     // Suppress conditions that were already active when the user marked themselves
-    // caught up. A changed event gets a changed key (4-day streak -> 5-day streak,
-    // +10% reference bucket -> +20%) and can surface again.
+    // caught up. There are two ways back out of suppression: a changed key (4-day
+    // streak -> 5-day streak, +10% reference bucket -> +20%), or — for events whose
+    // key is fixed for the session — a strengthening recorded after the checkpoint.
     const acknowledged = new Set(snapshot[item.symbol]?.acknowledgedEventKeys ?? []);
     const stream = dataMode === 'REPLAY' ? 'replay' : 'market';
     // First visits use the latest session's market events and latest personal state.
     // Checkpoint visits preserve the full absence without rerunning shared detectors.
     const after = cp ? Math.max(cp.takenAt, item.addedAt) : (q.asOf - 24 * 3600_000);
     const shared = marketEvents(item.symbol, stream, after, now)
-      .filter((event) => !acknowledged.has(event.dedupKey));
+      // Acknowledgement covers the event AS IT STOOD. "I've seen the 3x volume spike"
+      // is not "I've seen the 6x one" — VOLUME_SPIKE, GAP_OPEN and BREACH_52W keep a
+      // fixed dedup key as they intensify, so without this they would stay silent all
+      // session once acknowledged. An acknowledged event earns its way back only by
+      // genuinely changing since the checkpoint; a static 4-day streak stays quiet.
+      .filter((event) => !acknowledged.has(event.dedupKey) || (event.lastUpdatedAt ?? 0) > after);
     const personal = cp
       ? personalEvents({ symbol: item.symbol, stream, after, until: now, latestAsOf: q.asOf,
           checkpointPrice, refPrice: item.refPrice ?? undefined, acknowledged, sensitivity })

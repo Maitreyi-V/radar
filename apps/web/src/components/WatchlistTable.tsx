@@ -57,7 +57,7 @@ export function WatchlistTable({ quotes, onRemove, onOpen, flash }: {
                 </td>
                 <td className="px-4 py-3 text-right num text-slate-400 hidden lg:table-cell">{compact(q.volume)}</td>
                 <td className="px-4 py-3 hidden sm:table-cell"><Sparkline points={q.sparkline} direction={q.changePct} /></td>
-                <td className="px-4 py-3"><FreshnessChip freshness={q.freshness} ageMs={q.ageMs} /></td>
+                <td className="px-4 py-3"><FreshnessChip freshness={q.freshness} asOf={q.asOf} /></td>
                 <td className="px-2 py-3 text-right">
                   <button onClick={() => onRemove(q.symbol)}
                     className="text-slate-600 hover:text-down px-2 text-lg leading-none" title="Remove">×</button>

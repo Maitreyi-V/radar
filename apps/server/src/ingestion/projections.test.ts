@@ -15,6 +15,8 @@ let detectors: typeof import('../significance/detectors.js');
 const OPEN = Date.UTC(2026, 8, 4, 3, 45);
 const step = 30_000;
 const symbol = 'TEST.NS';
+/** IST session OPEN falls in — 09:15 on Fri 4 Sep 2026. Novelty keys are session-scoped. */
+const SESSION = '2026-09-04';
 
 function quote(price: number, at: number, extra: Partial<Quote> = {}): Quote {
   return { symbol, price, asOf: at, fetchedAt: at, source: 'test', isSynthetic: false,
@@ -93,8 +95,32 @@ describe('ingestion projections and digest reads', () => {
     writeQuote(quote(130, OPEN, { volume: 3000 }));
     writeQuote(quote(100, OPEN + step, { volume: 4000 }));
     checkpoint(OPEN + step);
-    writeQuote(quote(100.5, OPEN + 2 * step, { volume: 5000 }));
+    // Volume drifts 4.0x -> 4.1x of average. It is cumulative, so it rises on every
+    // tick; an immaterial gain must NOT reopen a condition the user is caught up on.
+    writeQuote(quote(100.5, OPEN + 2 * step, { volume: 4100 }));
     expect(events(OPEN + 2 * step)).toEqual([]);
+    // The row still records the newer reading — we hold back the clock, not the numbers.
+    const stored = db.prepare(`SELECT payload, occurred_at, last_updated_at FROM market_events`)
+      .get() as { payload: string; occurred_at: number; last_updated_at: number };
+    expect(JSON.parse(stored.payload).magnitude).toBeCloseTo(4.1, 10);
+    expect(stored.last_updated_at).toBe(OPEN + step);
+  });
+
+  it('reopens a condition the user is caught up on once it strengthens materially', () => {
+    writeQuote(quote(130, OPEN, { volume: 3000 }));
+    writeQuote(quote(100, OPEN + step, { volume: 4000 }));
+    checkpoint(OPEN + step);
+    // 4.0x -> 5.0x is a 25% gain in weight: genuinely new information, so it surfaces
+    // again even though the event FIRST occurred well before the checkpoint.
+    writeQuote(quote(100.5, OPEN + 2 * step, { volume: 5000 }));
+    const surfaced = events(OPEN + 2 * step);
+    // The pre-checkpoint price extremum of 130 still stays buried.
+    expect(surfaced.map((e) => e.type)).toEqual(['VOLUME_SPIKE']);
+    expect(surfaced[0]?.magnitude).toBe(5);
+    // occurred_at never moves; last_updated_at is what earned it a second showing.
+    expect(surfaced[0]?.occurredAt).toBe(OPEN);
+    expect(surfaced[0]?.lastUpdatedAt).toBe(OPEN + 2 * step);
+    expect(count('market_events')).toBe(1);
   });
 
   it('never leaks a future peak or volume into an earlier as-of digest', () => {
@@ -191,14 +217,14 @@ describe('ingestion projections and digest reads', () => {
     expect(recentDigestEventKeys('w', OPEN + step)).toEqual([]);
     digest(OPEN);
     digest(OPEN);
-    expect(recentDigestEventKeys('w', OPEN + step).map((keys) => keys.sort())).toEqual([[`${symbol}:VOLATILITY_MOVE`, `${symbol}:VOLUME_SPIKE`]]);
+    expect(recentDigestEventKeys('w', OPEN + step).map((keys) => keys.sort())).toEqual([[`${symbol}:VOLATILITY_MOVE:${SESSION}`, `${symbol}:VOLUME_SPIKE:${SESSION}`]]);
     expect(recentDigestEventKeys('another-watchlist', OPEN + step)).toEqual([]);
   });
 
   it('keeps a new event type eligible while damping repeats only in their own watchlist', async () => {
     const { recordDigestExposure, recentDigestEventKeys } = await import('../digest/events.js');
     for (let i = 1; i <= 3; i++) {
-      recordDigestExposure('w', `prior-${i}`, OPEN - i * step, [{ symbol, type: 'VOLUME_SPIKE' }]);
+      recordDigestExposure('w', `prior-${i}`, OPEN - i * step, [{ symbol, type: 'VOLUME_SPIKE', sessionDate: SESSION }]);
     }
     writeQuote(quote(100, OPEN, { volume: 3000, prevClose: 99, week52High: 100 }));
     const options = { userId: 'u', watchlistId: 'w', now: OPEN };
@@ -206,7 +232,7 @@ describe('ingestion projections and digest reads', () => {
     expect(first.cards[0]?.events.map((e) => e.type)).toEqual(['BREACH_52W']);
     expect(first.cards[0]?.events[0]?.noveltyFactor).toBe(1);
     expect(buildDigest(options)).toEqual(first);
-    expect(recentDigestEventKeys('w', OPEN + 1)[0]).toEqual([`${symbol}:BREACH_52W`]);
+    expect(recentDigestEventKeys('w', OPEN + 1)[0]).toEqual([`${symbol}:BREACH_52W:${SESSION}`]);
 
     db.prepare(`INSERT INTO watchlists VALUES ('other','u','Other',1,?)`).run(OPEN);
     db.prepare(`INSERT INTO watchlist_items VALUES ('other',?,?,100)`).run(symbol, OPEN - 1);
@@ -229,6 +255,53 @@ describe('ingestion projections and digest reads', () => {
       expect(applyColumnMigrations(legacy)).toContain('digest_exposures.event_keys');
       expect(applyColumnMigrations(legacy)).toEqual([]);
       expect(legacy.prepare('SELECT event_keys FROM digest_exposures').get()).toEqual({ event_keys: '[]' });
+    } finally { legacy.close(); }
+  });
+
+  it('strengthens the drill-down log in place instead of logging the same event twice', async () => {
+    const { recordEvents, eventsForSymbol } = await import('../digest/events.js');
+    const scored = (magnitude: number, score: number, at: number) => ({
+      symbol, type: 'VOLUME_SPIKE' as const, magnitude, baseScore: magnitude * 1.2, score,
+      occurredAt: OPEN, lastUpdatedAt: at, recency: 1, noveltyFactor: 1,
+      detail: { ratio: magnitude }, dedupKey: `${symbol}:VOLUME_SPIKE:${SESSION}`,
+      sessionDate: SESSION, explanation: `${magnitude}x`,
+    });
+
+    expect(recordEvents([scored(3, 6, OPEN)])).toBe(1);
+    // A bigger recurrence carrying a LOWER ranked score — recency and novelty have
+    // damped it since the first showing. It must still win, because strength is the raw
+    // magnitude; ranking on `score` here would freeze the 3x reading in place forever.
+    expect(recordEvents([scored(5, 2, OPEN + step)])).toBe(0);
+    expect(count('events')).toBe(1);
+    const logged = eventsForSymbol(symbol, 0)[0];
+    expect(logged?.magnitude).toBe(5);
+    expect(logged?.occurredAt).toBe(OPEN);
+    expect(logged?.updatedAt).toBe(OPEN + step);
+
+    // Re-recording the same reading is a refresh, not an update: the clock must not move.
+    recordEvents([scored(5, 2, OPEN + step)]);
+    expect(eventsForSymbol(symbol, 0)[0]?.updatedAt).toBe(OPEN + step);
+    expect(count('events')).toBe(1);
+  });
+
+  it('seeds last-updated tracking in existing databases from what they already knew', async () => {
+    const { default: SQLite } = await import('better-sqlite3');
+    const { applyColumnMigrations } = await import('../db/migrate.js');
+    const legacy = new SQLite(':memory:');
+    try {
+      legacy.exec(`CREATE TABLE symbols (symbol TEXT, bse_code TEXT, mktcap REAL, tracked INTEGER);
+        CREATE TABLE market_events (stream TEXT, symbol TEXT, dedup_key TEXT, occurred_at INTEGER, peak_at INTEGER, payload TEXT);
+        CREATE TABLE events (id TEXT, symbol TEXT, type TEXT, magnitude REAL, score REAL, occurred_at INTEGER, detail TEXT, dedup_key TEXT);
+        INSERT INTO market_events VALUES ('market','TEST.NS','k',100,180,'{}');
+        INSERT INTO events VALUES ('e1','TEST.NS','VOLUME_SPIKE',3,4,100,'{}','k');`);
+      const applied = applyColumnMigrations(legacy);
+      expect(applied).toContain('market_events.last_updated_at');
+      expect(applied).toContain('events.updated_at');
+      // Seeded rather than left at 0, so a pre-existing row keeps behaving exactly as
+      // it did before the column existed instead of looking permanently un-updated.
+      expect(legacy.prepare('SELECT last_updated_at FROM market_events').get()).toEqual({ last_updated_at: 180 });
+      expect(legacy.prepare('SELECT updated_at FROM events').get()).toEqual({ updated_at: 100 });
+      expect(applyColumnMigrations(legacy)).toEqual([]);
     } finally { legacy.close(); }
   });
 

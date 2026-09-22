@@ -16,7 +16,7 @@ const TTL_MS = 30_000;
 
 interface Entry { digest: Digest; at: number }
 
-const store = new Map<string, Entry>();
+const store = new Map<string, Entry>(); // this is the in memory(map) cache for digests, keyed by userId:watchlistId:limit
 
 const key = (userId: string, watchlistId: string, limit: number): string =>
   `${userId}:${watchlistId}:${limit}`;
@@ -24,6 +24,7 @@ const key = (userId: string, watchlistId: string, limit: number): string =>
 export function getCached(userId: string, watchlistId: string, limit: number): Digest | null {
   const hit = store.get(key(userId, watchlistId, limit));
   if (!hit) return null;
+  // lazy invalidation(ntg checks theage until someone tries to read it) - not the sweeper one where 
   if (Date.now() - hit.at > TTL_MS) { store.delete(key(userId, watchlistId, limit)); return null; }
   return hit.digest;
 }
@@ -37,8 +38,18 @@ export function setCached(userId: string, watchlistId: string, limit: number, di
  * a new checkpoint, or the watchlist membership changing — because a cache that
  * outlives its inputs is just a bug with better latency.
  */
+// loop over the keys and delete any that match the watchlistId
 export function invalidate(watchlistId: string): void {
   for (const k of [...store.keys()]) if (k.includes(`:${watchlistId}:`)) store.delete(k);
 }
+
+// Called whenever the facts change:
+
+// POST /checkpoint          ← the diff anchor moved
+// POST /symbols             ← added a stock
+// DELETE /symbols/:symbol   ← removed one
+// PATCH /watchlists/:id     ← renamed
+// DELETE /watchlists/:id
+// POST /demo/reset
 
 export function cacheSize(): number { return store.size; }

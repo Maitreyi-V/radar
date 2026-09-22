@@ -9,7 +9,7 @@ export interface SymbolContext {
   symbol: string;
   /** Daily history, oldest first, EXCLUDING today. */
   bars: Bar[];
-  price: number;
+  price: number; // current price 
   volume: number | null;
   dayOpen: number | null;
   prevClose: number | null;
@@ -22,11 +22,11 @@ export interface SymbolContext {
   checkpointPrice?: number;
   checkpointAt?: number;
   /** Price when the user ADDED the stock — powers the personal REF_DRAWDOWN signal. */
-  refPrice?: number;
+  refPrice?: number;                                                 
   /** IST session date of `asOf`, used to build stable dedup keys. */
   sessionDate: string;
 }
-
+// what a detector returns
 export interface DetectedEvent {
   symbol: string;
   type: EventType;
@@ -38,6 +38,13 @@ export interface DetectedEvent {
   /** The numbers behind the sentence — rendered in the UI, never hidden. */
   detail: Record<string, number | string | null>;
   dedupKey: string;
+  /** IST session this event belongs to. Scopes novelty damping to ONE trading day:
+   * a card shown earlier TODAY damps; the same stock + type tomorrow starts fresh. */
+  sessionDate: string;
+  /** When this event's strength last changed. The digest gate is
+   * `lastUpdatedAt > checkpoint.takenAt` — did this move while you were away?
+   * Undefined = never restated, so `occurredAt` is the only clock it has. */
+  lastUpdatedAt?: number;
   /** Plain-English, with its numbers. No unexplained badges. */
   explanation: string;
 }
