@@ -75,7 +75,14 @@ export function QuietPanel({ count, detail, sensitivity }: {
                       {d.sigmaPct === null ? 'unknown' : `usually ±${d.sigmaPct.toFixed(1)}% a day`}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">{d.reason}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-500">
+                    {d.reason}
+                    {d.heldBack && (
+                      <span className="block text-[10px] text-slate-600 mt-0.5">
+                        held back: {d.heldBack.explanation}
+                      </span>
+                    )}
+                  </td>
                   {math && <>
                     <td className="px-3 py-2.5 text-right num text-slate-600 text-xs">
                       {d.sigmaPct === null ? '—' : `${d.sigmaPct.toFixed(2)}%`}

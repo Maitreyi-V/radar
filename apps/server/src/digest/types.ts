@@ -1,4 +1,5 @@
 import type { ScoredEvent } from '../significance/score.js';
+import type { EventType } from '../significance/types.js';
 //  Freshness is per PRICE ("how old is this number?").
 //  DataMode is per DIGEST ("current feed, recorded demo, or replay?").
 export type Freshness = 'LIVE' | 'DELAYED' | 'STALE' | 'MARKET_CLOSED' | 'RECORDED' | 'REPLAY'; // how old is this number 
@@ -44,6 +45,8 @@ export interface Digest {
     symbol: string; name: string; price: number;
     changePct: number | null; sigmaPct: number | null; z: number | null;
     reason: string;
+    /** The strongest signal we held back, if any. null = genuinely nothing fired. */
+    heldBack: { type: EventType; explanation: string; score: number } | null;
   }>;
   /** The attention threshold this digest was computed with. */
   sensitivity: number;

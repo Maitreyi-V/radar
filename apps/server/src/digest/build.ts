@@ -124,7 +124,7 @@ export function buildDigest(opts: {
   const sensitivity = opts.sensitivity ?? ATTENTION_THRESHOLD;
   let dataMode = opts.dataMode ?? 'CURRENT';
 
-  const items = itemsStmt.all(opts.watchlistId) as ItemRow[]; // what youre watching
+  const items = itemsStmt.all(opts.watchlistId) as ItemRow[]; // load the stocks in this watchlist — with each one's add price and add time.
   const cp = checkpointStmt.get(opts.watchlistId, opts.userId) as
     | { id: string; takenAt: number; snapshot: string }
     | undefined; // what you last saw
@@ -152,7 +152,7 @@ export function buildDigest(opts: {
     const checkpointPrice = snapshot[item.symbol]?.price;
     let q = (dataMode === 'REPLAY'
       ? latestReplayStmt.get(item.symbol, now)
-      : latestNonReplayStmt.get(item.symbol, now)) as QuoteRow | undefined;
+      : latestNonReplayStmt.get(item.symbol, now)) as QuoteRow | undefined; //get this stock's latest price. Pull from the replay stream if we're replaying, otherwise the real one.
 
     // At the beginning of a replay, a symbol may not have emitted its first tick yet.
     // Its checkpoint price is the only state the user could honestly know at that point;
@@ -170,12 +170,13 @@ export function buildDigest(opts: {
       dataMode = 'REPLAY';
     }
 
+    //load this stock's daily history, then package everything into the SymbolContext shape the detectors expect.
     const bars = barsBefore(item.symbol, sessionDate(q.marketAsOf ?? q.asOf));
     const ctx = contextForQuote(
       item.symbol, q, bars, checkpointPrice, cp?.takenAt, item.refPrice ?? undefined,
     );
 
-    // A checkpoint is an acknowledgement boundary, not just a price baseline.
+   
     // Suppress conditions that were already active when the user marked themselves
     // caught up. There are two ways back out of suppression: a changed key (4-day
     // streak -> 5-day streak, +10% reference bucket -> +20%), or — for events whose
@@ -192,15 +193,17 @@ export function buildDigest(opts: {
       // session once acknowledged. An acknowledged event earns its way back only by
       // genuinely changing since the checkpoint; a static 4-day streak stays quiet.
       .filter((event) => !acknowledged.has(event.dedupKey) || (event.lastUpdatedAt ?? 0) > after);
-    const personal = cp
+    const personal = cp // run the 2 personal detectors
       ? personalEvents({ symbol: item.symbol, stream, after, until: now, latestAsOf: q.asOf,
           checkpointPrice, refPrice: item.refPrice ?? undefined, acknowledged, sensitivity })
       : [detectVolatilityMove(ctx), detectRefDrawdown(ctx)].filter((event) => event !== null);
     const newlyMeaningful = [...shared, ...personal];
-    const scored = rank(newlyMeaningful, { now, recentDigestEventKeys: history, threshold: sensitivity });
+    const ranked = rank(newlyMeaningful, { now, recentDigestEventKeys: history, threshold: 0 });
+    const scored = ranked.filter((e) => e.score >= sensitivity);
 
     if (scored.length === 0) {
       quietSymbols.push(item.symbol);
+      const held = ranked[0]; // strongest thing we supressed 
       // Record the arithmetic behind the silence, so the user can audit it.
       const sigma = volatility(bars, 30);
       const base = checkpointPrice ?? q.prevClose;
@@ -218,6 +221,9 @@ export function buildDigest(opts: {
           : z === null
             ? 'no earlier price to compare against'
             : plainVerdict(z),
+        heldBack: held
+          ? { type: held.type, explanation: held.explanation, score: round2(held.score) }
+          : null,
       });
       continue;
     }
@@ -243,20 +249,37 @@ export function buildDigest(opts: {
   // the digest ten times records each event exactly once. Skipped entirely during
   // replay — see `builtFromReplay` above.
 
-  cards.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+  cards.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol)); // tie braker on name 
   const top = cards.slice(0, limit);
+  //storewhat we just showed- but only for real digests 
   if (!builtFromReplay && dataMode !== 'REPLAY') {
     recordEvents(top.flatMap((c) => c.events));
     recordDigestExposure(opts.watchlistId, cp?.id ?? 'first-visit', now, top.flatMap((c) => c.events));
   }
   // Cards that existed but lost the attention budget still count as "quiet" to the user.
-  const overflow = cards.slice(limit).map((c) => c.symbol);
+  const overflowCards = cards.slice(limit);
+  const overflow = overflowCards.map((c) => c.symbol);
+
+  // These fired real events; they simply lost the attention budget. The user is told WHAT
+  // happened and nothing about the ranking that demoted it — "didn't make the top 5" is a
+  // fact about our internals, not about their money. So the event's own sentence IS the
+  // reason here, and heldBack stays null: it means one thing only, a signal that scored
+  // below the bar, which is never the case for a card that merely overflowed.
+  for (const c of overflowCards) {
+    quietDetail.push({
+      symbol: c.symbol, name: c.name, price: c.price,
+      changePct: c.changePct, sigmaPct: null, z: null,
+      reason: c.headline,
+      heldBack: null,
+    });
+  }
 
   return {
     watchlistId: opts.watchlistId,
     dataMode,
     dataSessionDate: opts.dataSessionDate ?? null,
     since: cp?.takenAt ?? null,
+    //the "since you left" wording. Recorded and replay modes get fixed phrasing, because a real elapsed time would be meaningless there.
     sinceLabel: cp && dataMode === 'RECORDED'
       ? 'at the previous close in this demo scenario'
       : cp && dataMode === 'REPLAY'

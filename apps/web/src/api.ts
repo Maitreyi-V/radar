@@ -27,6 +27,8 @@ export interface DigestCard {
 export interface QuietDetail {
   symbol: string; name: string; price: number;
   changePct: number | null; sigmaPct: number | null; z: number | null; reason: string;
+  /** The strongest signal we held back, if any. null = genuinely nothing fired. */
+  heldBack: { type: string; explanation: string; score: number } | null;
 }
 
 export interface Digest {
